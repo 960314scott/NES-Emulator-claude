@@ -1,0 +1,33 @@
+{
+  "name": "nes-emulator",
+  "version": "1.0.0",
+  "description": "Cycle-accurate-oriented NES emulator (runs AccuracyCoin)",
+  "main": "main.js",
+  "author": "your-name",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron . --no-sandbox",
+    "dist": "electron-builder --win portable --publish never"
+  },
+  "devDependencies": {
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.example.nesemulator",
+    "productName": "NES-Emulator",
+    "files": [
+      "main.js",
+      "index.html",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable",
+      "artifactName": "NES-Emulator-${version}.exe"
+    }
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "electron-winstaller@5.4.0": true
+  }
+}

@@ -1,0 +1,371 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>NES 模擬器（逐週期架構）</title>
+<style>
+:root{--bg:#f4f4f2;--fg:#1c1c1a;--ac:#c0392b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161615;--fg:#eeeeec;--ac:#ff6b5b}}
+:root[data-theme="dark"]{--bg:#161615;--fg:#eeeeec;--ac:#ff6b5b}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px system-ui,"Noto Sans TC",sans-serif;display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px}
+h1{font-size:20px;margin:0}canvas{width:min(100%,768px);aspect-ratio:256/240;image-rendering:pixelated;background:#000;border-radius:8px}
+.btn{background:var(--ac);color:#fff;padding:10px 18px;border-radius:8px;cursor:pointer}
+p{margin:0;font-size:14px;opacity:.8;text-align:center;max-width:640px}
+.tp{display:none;width:min(100%,520px);justify-content:space-between;align-items:center;user-select:none;-webkit-user-select:none;touch-action:none}
+@media (pointer:coarse){.tp{display:flex}}
+.tp div{display:grid;gap:6px}.d{grid-template-columns:repeat(3,52px)}
+.tp b{display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:50%;background:var(--fg);color:var(--bg);opacity:.35;font-size:14px}
+.tp b:active{opacity:.7}.tp .w{border-radius:12px;width:64px;height:36px}
+</style></head><body>
+<h1>NES 模擬器・逐週期架構</h1>
+<canvas id="c" width="256" height="240"></canvas>
+<label class="btn">載入 ROM（.nes）<input type="file" id="f" accept=".nes" hidden></label>
+<p id="msg">選擇或拖曳 .nes 檔案到此頁面（請使用你自己合法持有的 ROM）</p>
+<div class="tp"><div class="d"><i></i><b data-b="16">▲</b><i></i><b data-b="64">◀</b><i></i><b data-b="128">▶</b><i></i><b data-b="32">▼</b><i></i></div><div><b class="w" data-b="4">Select</b><b class="w" data-b="8">Start</b></div><div><b data-b="2">B</b><b data-b="1">A</b></div></div>
+<p>按鍵：方向鍵＝十字鍵，X＝A，Z＝B，Shift＝Select，Enter＝Start；手機可用螢幕按鈕<br>支援 Mapper 0、1、2、3、4、7、66，含音效（方波×2、三角波、噪音）</p>
+<script>
+const $=id=>document.getElementById(id);
+const cv=$('c'),cx=cv.getContext('2d'),img=cx.createImageData(256,240),fb=new Uint32Array(img.data.buffer);
+const PAL=[0x666666,0x002A88,0x1412A7,0x3B00A4,0x5C007E,0x6E0040,0x6C0600,0x561D00,0x333500,0x0B4800,0x005200,0x004F08,0x00404D,0,0,0,
+0xADADAD,0x155FD9,0x4240FF,0x7527FE,0xA01ACC,0xB71E7B,0xB53120,0x994E00,0x6B6D00,0x388700,0x0C9300,0x008F32,0x007C8D,0,0,0,
+0xFFFEFF,0x64B0FF,0x9290FF,0xC676FF,0xF36AFF,0xFE6ECC,0xFE8170,0xEA9E22,0xBCBE00,0x88D800,0x5CE430,0x45E082,0x48CDDE,0x4F4F4F,0,0,
+0xFFFEFF,0xC0DFFF,0xD3D2FF,0xE8C8FF,0xFBC2FF,0xFEC4EA,0xFECCC5,0xF7D8A5,0xE4E594,0xCFEF96,0xBDF4AB,0xB3F3CC,0xB5EBF2,0xB8B8B8,0,0].map(c=>(0xFF000000|((c&255)<<16)|(c&0xFF00)|(c>>16))>>>0);
+
+function NES(rom){
+ if(rom[0]!=0x4e||rom[1]!=0x45||rom[2]!=0x53)throw Error('不是有效的 iNES (.nes) 檔案');
+ const f6=rom[6],mp=(f6>>4)|(rom[7]&0xf0),np=rom[4],nc=rom[5];
+ if(![0,1,2,3,4,7,66].includes(mp))throw Error('尚未支援 Mapper '+mp);
+ let o=16+(f6&4?512:0);
+ const prg=rom.slice(o,o+np*16384);o+=np*16384;
+ const chrRam=!nc,chr=nc?rom.slice(o,o+nc*8192):new Uint8Array(8192);
+ const ram=new Uint8Array(2048),prgRam=new Uint8Array(8192),vram=new Uint8Array(2048),oam=new Uint8Array(256),pal=new Uint8Array(32);
+ const P=[0,0,0,0],C=[0,0,0,0,0,0,0,0];let nta;
+ const setMir=m=>nta=[[0,0,1,1],[0,1,0,1],[0,0,0,0],[1,1,1,1]][m];
+ const p16=(i,b)=>{P[i*2]=(b*16384)%prg.length;P[i*2+1]=(P[i*2]+8192)%prg.length};
+ const cb=(i,off)=>C[i]=off%chr.length;
+ const c8k=b=>{for(let i=0;i<8;i++)cb(i,b*8192+i*1024)};
+ let sr=16,mc=12,c0=0,c1=0,pb=0,bs=0,rg=[0,2,4,5,6,7,0,1],il=0,ic=0,ie=0,irq=0;
+ const u3=()=>{const n8=np*2,p8=(i,b)=>P[i]=(b%n8)*8192,r=rg,pm=bs&64,iv=bs&128?4:0,c=(i,b)=>cb(i,b*1024);
+  p8(pm?2:0,r[6]);p8(pm?0:2,n8-2);p8(1,r[7]);p8(3,n8-1);
+  c(iv,r[0]&254);c(iv+1,r[0]|1);c(iv+2,r[1]&254);c(iv+3,r[1]|1);c(iv^4,r[2]);c((iv^4)+1,r[3]);c((iv^4)+2,r[4]);c((iv^4)+3,r[5])};
+ const upd=()=>{
+  setMir([2,3,1,0][mc&3]);const m=mc>>2&3;
+  if(m<2){const b=pb&14;p16(0,b);p16(1,b+1)}else if(m==2){p16(0,0);p16(1,pb&15)}else{p16(0,pb&15);p16(1,np-1)}
+  if(mc&16){for(let i=0;i<4;i++){cb(i,c0*4096+i*1024);cb(i+4,c1*4096+i*1024)}}else c8k(c0>>1);
+ };
+ const mw=(a,v)=>{
+  if(mp==1){if(v&128){sr=16;mc|=12;upd();return}const f=sr&1;sr=sr>>1|(v&1)<<4;
+   if(f){const r=a>>13&3;if(r==0)mc=sr;else if(r==1)c0=sr;else if(r==2)c1=sr;else pb=sr;sr=16;upd()}}
+  else if(mp==2)p16(0,v%np);
+  else if(mp==3)c8k(v%(nc||1));
+  else if(mp==7){const b=(v&7)*32768%prg.length;for(let i=0;i<4;i++)P[i]=(b+i*8192)%prg.length;setMir(v&16?3:2)}
+  else if(mp==4){const r=a>>13&3,e=a&1;if(r==0){if(e)rg[bs&7]=v;else bs=v;u3()}else if(r==1){if(!e)setMir(v&1?0:1)}else if(r==2){if(e)ic=0;else il=v}else{if(e)ie=1;else{ie=0;irq=0}}}
+  else if(mp==66){const b=(v>>4&3)*32768%prg.length;for(let i=0;i<4;i++)P[i]=(b+i*8192)%prg.length;c8k(v&3)}
+ };
+ setMir(f6&1);c8k(0);
+ if(mp==1)upd();else if(mp==7||mp==66)mw(0,0);else if(mp==4)u3();else{p16(0,0);p16(1,np-1)}
+
+ // ===== 新架構：逐週期 CPU（每次匯流排存取推進 PPU）+ 逐點 PPU =====
+ let ctrl=0,mask=0,st=0,oa=0,v=0,t=0,fx=0,w=0,buf=0,ob=0,sl=0,dot=0,odd=0,fd=0,nmiO=0,nmiE=0,nmiP=0,noV=0;
+ let bgL=0,bgH=0,atL=0,atH=0,nId=0,nAt=0,nLo=0,nHi=0,sn=0,s0c=0,r2=0,stk=0,n0=0;
+ const sLo=[],sHi=[],sAt=[],sX=[];
+ const prd=a=>{a&=0x3fff;if(a<0x2000)return chr[C[a>>10]+(a&1023)];if(a<0x3f00)return vram[nta[a>>10&3]<<10|a&1023];a&=31;if(!(a&3))a&=15;return pal[a]};
+ const pwr=(a,q)=>{a&=0x3fff;if(a<0x2000){if(chrRam)chr[C[a>>10]+(a&1023)]=q}else if(a<0x3f00)vram[nta[a>>10&3]<<10|a&1023]=q;else{a&=31;if(!(a&3))a&=15;pal[a]=q}};
+ const obT=new Array(8).fill(0),obv=()=>{for(let i=0;i<8;i++)if(cyc-obT[i]>1000000)ob&=~(1<<i);return ob};const updNmi=()=>{nmiO=st&128&&ctrl&128?1:0};
+ const incX=()=>{if((v&31)==31)v=v&~31^0x400;else v++};
+ const incY=()=>{if((v&0x7000)!=0x7000)v+=0x1000;else{v&=~0x7000;let y=(v&0x3e0)>>5;if(y==29){y=0;v^=0x800}else if(y==31)y=0;else y++;v=v&~0x3e0|y<<5}};
+ const soam=new Uint8Array(32),tLo=[0,0,0,0,0,0,0,0],tHi=[0,0,0,0,0,0,0,0],tAt=[0,0,0,0,0,0,0,0],tX=[0,0,0,0,0,0,0,0];
+ let sa=0,aH0=0,cp=0,inR=0,aH=0,aL=0,cdn=0,ovb=0,s0a=0,s0v=0,scnt=0,si=0;
+ const spEval=()=>{
+  if(dot<65){cp=255;soam[dot-1>>1]=255;return}
+  if(dot==65){s0a=0;inR=0;sa=0;ovb=0;cdn=0;aH=oa>>2&63;aH0=aH;aL=oa&3}
+  if(dot&1){cp=oam[oa]}
+  else{
+   if(cdn){aH=aH+1&63;if(sa>=32)cp=soam[sa&31]}
+   else{
+    const h=ctrl&32?16:8;
+    if(!inR&&sl>=cp&&sl<cp+h)inR=1;
+    if(sa<32){
+     soam[sa]=cp;
+     if(inR){aL++;sa++;if(aH==aH0)s0a=1;
+      if((sa&3)==0){inR=0;aL=0;aH=aH+1&63;if(aH==0)cdn=1}}
+     else{aH=aH+1&63;if(aH==0)cdn=1}
+    }else{
+     cp=soam[sa&31];
+     if(inR){st|=0x20;aL++;if(aL==4){aH=aH+1&63;aL=0}
+      if(ovb==0)ovb=3;else{ovb--;if(ovb==0){cdn=1;aL=0}}}
+     else{aH=aH+1&63;aL=aL+1&3;if(aH==0)cdn=1}
+    }
+   }
+   oa=(aH<<2)+aL&255}
+ };
+ const ldSpr=pr=>{
+  const b=si*4,y=soam[b],ti=soam[b+1],at=soam[b+2],x=soam[b+3],h=ctrl&32?16:8,scn=pr?-1:sl;
+  const lo=at&128?h-1-(scn-y):scn-y;
+  const ta=h==16?((ti&1?4096:0)|(ti&254)<<4)+(lo>=8?lo+8:lo):((ti<<4)|(ctrl&8?4096:0))+lo;
+  if(si<scnt&&y<240){tAt[si]=at;tX[si]=x;tLo[si]=prd(ta);tHi[si]=prd(ta+8)}else prd(ta);
+  si++};
+ const incV=()=>{if(mask&24&&(sl<240||sl==261)){incX();incY()}else v=v+(ctrl&4?32:1)&0x7fff};
+ const pixel=x=>{
+  let bp=0,bpal=0,sp=0,spal=0,pri=0,s0=0;
+  if(mask&8&&(x>7||mask&2)){const m=0x8000>>fx;bp=(bgL&m?1:0)|(bgH&m?2:0);bpal=(atL&m?1:0)|(atH&m?2:0)}
+  if(mask&16&&(x>7||mask&4)){
+   for(let k=0;k<scnt;k++){const d=x-tX[k];if(d>=0&&d<8){const b=tAt[k]&64?d:7-d,c=tLo[k]>>b&1|(tHi[k]>>b&1)<<1;if(c){sp=c;spal=4|tAt[k]&3;pri=tAt[k]&32;s0=k==0&&s0v;break}}}}
+  if(s0&&bp&&x<255)st|=0x40;
+  let ci=bp?bpal<<2|bp:0;
+  if(sp&&(!bp||!pri))ci=spal<<2|sp;
+  let c=pal[ci];if(mask&1)c&=0x30;
+  fb[sl*256+x]=PAL[c&63];
+ };
+ const ppuDot=()=>{
+  const rn=mask&24,vis=sl<240,pre=sl==261;
+  if(vis||pre){
+   if(rn){
+    if(dot>1&&dot<258||dot>320&&dot<338){
+     bgL=bgL<<1&65535;bgH=bgH<<1&65535;atL=atL<<1&65535;atH=atH<<1&65535;
+     switch(dot-1&7){
+      case 0:bgL=bgL&0xff00|nLo;bgH=bgH&0xff00|nHi;atL=atL&0xff00|(nAt&1?255:0);atH=atH&0xff00|(nAt&2?255:0);nId=prd(0x2000|v&0xfff);break;
+      case 2:{let a=prd(0x23c0|v&0xc00|v>>4&0x38|v>>2&7);if(v>>5&2)a>>=4;if(v&2)a>>=2;nAt=a&3;break}
+      case 4:nLo=prd((ctrl&16?4096:0)+nId*16+(v>>12&7));break;
+      case 6:nHi=prd((ctrl&16?4096:0)+nId*16+(v>>12&7)+8);break;
+      case 7:incX()}}
+    if(dot==256)incY();
+    if(vis&&dot<257)spEval();
+    if(pre&&dot<9&&oa>=8)oam[dot-1]=oam[(oa&0xf8)+dot-1];
+    if(dot==257){v=v&~0x41f|t&0x41f;s0v=s0a;scnt=sa>>2;si=0}
+    if(dot>256&&dot<321){oa=0;if((dot-260)%8==0)ldSpr(pre);else if((dot-257)%8==0||(dot-259)%8==0)prd(0x2000|v&0xfff)}
+    if(dot==260&&mp==4){if(!ic)ic=il;else ic--;if(!ic&&ie)irq=1}
+    if(pre&&dot>279&&dot<305)v=v&~0x7be0|t&0x7be0;
+   }
+   if(vis&&dot>0&&dot<257)pixel(dot-1);
+   if(pre&&dot==1){st&=0x1f;updNmi()}
+  }
+  if(sl==241&&dot==1){if(!noV)st|=128;noV=0;updNmi()}
+  if(pre&&dot==339&&rn&&odd)dot++;
+  if(++dot>340){dot=0;if(++sl>261){sl=0;odd^=1;fd=1}}
+ };
+ const ppu=n=>{while(n--)ppuDot()};
+ const pw=(r,q)=>{ob=q;obT.fill(cyc);switch(r){
+  case 0:ctrl=q;t=t&0xf3ff|(q&3)<<10;updNmi();break;
+  case 1:mask=q;break;
+  case 3:oa=q;break;
+  case 4:if(sl>=240&&sl<261||!(mask&24)){if((oa&3)==2)q&=0xe3;oam[oa]=q;oa=oa+1&255}else oa=oa+4&255;break;
+  case 5:if(!w){t=t&0xffe0|q>>3;fx=q&7}else{t=t&0x8fff|(q&7)<<12;t=t&0xfc1f|(q&0xf8)<<2}w^=1;break;
+  case 6:if(!w){t=t&0xff|(q&0x3f)<<8}else{t=t&0xff00|q;v=t}w^=1;break;
+  case 7:pwr(v,q);incV()}};
+ const preg=r=>{let q=obv();switch(r){
+  case 2:r2++;q=st&0xe0|obv()&0x1f;if(sl==241&&dot==1)noV=1;st&=0x7f;w=0;updNmi();break;
+  case 4:if(mask&24&&(sl<240||sl==261)){if(dot>256&&dot<321){sa=(dot-257>>3)*4+Math.min(dot-257&7,3);cp=soam[sa]}q=cp}else q=oam[oa];break;
+  case 7:{const ad=v&0x3fff;if(ad<0x3f00){q=buf;buf=prd(ad)}else{q=(prd(ad)&63&(mask&1?0x30:63))|ob&0xc0;buf=prd(ad-0x1000)}incV()}}
+  if(r==2){for(let i=5;i<8;i++)obT[i]=cyc;ob=ob&0x1f|q&0xe0}else if(r==4||r==7){obT.fill(cyc);ob=q}return q};
+
+ // 匯流排
+ let pad=0,sh=0,stb=0,db=0,dmaP=-1,inDma=0,oamReq=0,oamSrc=0;
+ const bus=a=>{
+  if(a<0x2000)return ram[a&2047];
+  if(a<0x4000)return preg(a&7);
+  if(a==0x4015)return APU.r()|db&0x20;
+  if(a==0x4016){let r;if(stb)r=pad&1;else{r=sh&1;sh=sh>>1|128}return r|db&0xe0}
+  if(a>=0x8000)return prg[P[a>>13&3]+(a&8191)];
+  if(a>=0x6000&&mp)return prgRam[a&8191];
+  return db};
+ const busw=(a,q)=>{
+  if(a<0x2000)ram[a&2047]=q;
+  else if(a<0x4000)pw(a&7,q);
+  else if(a==0x4014)dmaP=q;
+  else if(a==0x4016){stb=q&1;if(stb)sh=pad}
+  else if(a<0x4018)APU.w(a,q);
+  else if(a>=0x8000)mw(a,q);
+  else if(a>=0x6000&&mp)prgRam[a&8191]=q};
+
+ // CPU（每個週期 = 一次匯流排存取，PPU 同步前進 3 點）
+ let lastRdDma=0,dumDma=0,pc=0,A=0,X=0,Y=0,S=0xfd,fN=0,fV=0,fZ=0,fC=0,fI=1,fD=0,cyc=0,pol=0,pol0=0,bh=0,cr=0;
+ const end=(k=2)=>{ppu(k);cyc++;APU.cyc();if(nmiO&&!nmiP)nmiE=1;nmiP=nmiO;pol0=pol;pol=nmiE||((irq||APU.il)&&!fI)?1:0};
+ const rd=a=>{a&=0xffff;lastRdDma=0;if(!inDma&&(oamReq||APU.dm.req)){dmaRun(a);lastRdDma=1}ppu(2);const q=bus(a);if(a!=0x4015)db=q;end(1);return q};
+ const dmaRun=a=>{
+  inDma=1;rd(a);if(APU.dm.abort){APU.dm.abort=0;APU.dm.req=0}
+  let oam=oamReq,ph=0,cnt=0,val=0,dmy=1;oamReq=0;
+  while(oam||APU.dm.req){
+   if(!(cyc&1)){
+    if(APU.dm.req&&!dmy)APU.load(rd(APU.dm.cur));
+    else if(oam&&!ph){val=rd(oamSrc+cnt);ph=1}
+    else rd(a)
+   }else{
+    if(oam&&ph){wr(0x2004,val);ph=0;if(++cnt==256)oam=0}
+    else rd(a)}
+   dmy=0}
+  inDma=0};
+ const wr=(a,q)=>{a&=0xffff;ppu(1);db=q;busw(a,q);end();if(dmaP>=0){oamSrc=dmaP<<8;oamReq=1;dmaP=-1}};
+ const f=()=>{const q=rd(pc);pc=pc+1&0xffff;return q};
+ const push=q=>{wr(256|S,q);S=S-1&255};
+ const pop=()=>{S=S+1&255;return rd(256|S)};
+ const nz=q=>{fN=q>>7&1;fZ=q==0?1:0;return q};
+ const gP=()=>fN<<7|fV<<6|32|fD<<3|fI<<2|fZ<<1|fC;
+ const sP=q=>{fN=q>>7&1;fV=q>>6&1;fD=q>>3&1;fI=q>>2&1;fZ=q>>1&1;fC=q&1};
+ const adc=m=>{const s=A+m+fC;fV=(~(A^m)&(A^s)&128)?1:0;fC=s>255?1:0;A=nz(s&255)};
+ const cmp=(r,m)=>{fC=r>=m?1:0;nz(r-m&255)};
+ const shf=(a,x)=>{const o=fC;let r;if(a==0){fC=x>>7;r=x<<1&255}else if(a==1){fC=x>>7;r=(x<<1|o)&255}else if(a==2){fC=x&1;r=x>>1}else{fC=x&1;r=x>>1|o<<7}return r};
+ const shw3=(ad,r)=>{const q=r&(bh+1&255);if(cr)ad=ad&255|q<<8;wr(ad,q)};const shw=(ad,r)=>{const q=dumDma?r:r&(bh+1&255);if(cr&&!dumDma)ad=ad&255|q<<8;wr(ad,q)};
+ const vec=nm=>{if(nm)nmiE=0;fI=1;const l=rd(nm?0xfffa:0xfffe);pc=l|rd(nm?0xfffb:0xffff)<<8;pol0=0};
+ // 定址模式：m=0 (zp,X) 1 zp 2 imm 3 abs 4 (zp),Y 5 zp,X 6 abs,Y 7 abs,X 8 zp,Y；w=寫入/RMW（索引時必有 dummy read）
+ const am=(m,w)=>{let a,b,z;switch(m){
+  case 1:return f();
+  case 2:a=pc;pc=pc+1&0xffff;return a;
+  case 3:a=f();return a|f()<<8;
+  case 5:z=f();rd(z);return z+X&255;
+  case 8:z=f();rd(z);return z+Y&255;
+  case 0:z=f();rd(z);z=z+X&255;a=rd(z);return a|rd(z+1&255)<<8;
+  case 4:z=f();b=rd(z);b|=rd(z+1&255)<<8;a=b+Y&0xffff;bh=b>>8;cr=(a^b)&0xff00?1:0;if(w||cr){rd(b&0xff00|a&255);dumDma=lastRdDma}return a;
+  default:b=f();b|=f()<<8;a=b+(m==6?Y:X)&0xffff;bh=b>>8;cr=(a^b)&0xff00?1:0;if(w||cr){rd(b&0xff00|a&255);dumDma=lastRdDma}return a}};
+ const step=()=>{
+  if(pol0){rd(pc);rd(pc);push(pc>>8);push(pc&255);const nm0=nmiE;push(gP()&~16);vec(nm0);return}
+  const op=f(),c=op&3,b=op>>2&7,a=op>>5;
+  if(c==1){
+   const ad=am(b,a==4);
+   if(a==4){if(b==2)rd(ad);else wr(ad,A);return}
+   const x=rd(ad);
+   switch(a){case 0:A=nz(A|x);break;case 1:A=nz(A&x);break;case 2:A=nz(A^x);break;case 3:adc(x);break;case 5:A=nz(x);break;case 6:cmp(A,x);break;default:adc(x^255)}
+   return}
+  if(c==2){
+   if(b==2||b==6||b==4){rd(pc);
+    if(b==2){if(a<4)A=nz(shf(a,A));else if(a==4)A=nz(X);else if(a==5)X=nz(A);else if(a==6)X=nz(X-1&255)}
+    else if(b==6){if(a==4)S=X;else if(a==5)X=nz(S)}
+    return}
+   const m=b==0?2:b==5&&(a==4||a==5)?8:b==7&&(a==4||a==5)?6:b,ad=am(m,a!=5);
+   if(m==2&&a!=5){rd(ad);return}
+   if(a==4){if(b==7)shw(ad,X);else wr(ad,X);return}
+   if(a==5){X=nz(rd(ad));return}
+   const x=rd(ad);wr(ad,x);wr(ad,a==6?nz(x-1&255):a==7?nz(x+1&255):nz(shf(a,x)));return}
+  if(c==0){
+   if(b==4){const fl=[fN,fV,fC,fZ][a>>1],o=f();
+    if(fl==(a&1)){rd(pc);const t2=pc+(o<<24>>24)&0xffff;if((t2^pc)&0xff00)rd(pc&0xff00|t2&255);pc=t2}
+    return}
+   if(b==6){rd(pc);switch(a){case 0:fC=0;break;case 1:fC=1;break;case 2:fI=0;break;case 3:fI=1;break;case 4:A=nz(Y);break;case 5:fV=0;break;case 6:fD=0;break;case 7:fD=1}return}
+   if(b==2){rd(pc);switch(a){case 0:push(gP()|48);break;case 1:rd(256|S);sP(pop());break;case 2:push(A);break;case 3:rd(256|S);A=nz(pop());break;
+    case 4:Y=nz(Y-1&255);break;case 5:Y=nz(A);break;case 6:Y=nz(Y+1&255);break;case 7:X=nz(X+1&255)}return}
+   if(b==0&&a<4){
+    if(a==0){f();push(pc>>8);push(pc&255);const nm0=nmiE;push(gP()|48);vec(nm0);return}
+    if(a==1){const l=f();rd(256|S);push(pc>>8);push(pc&255);pc=l|rd(pc)<<8;return}
+    if(a==2){rd(pc);rd(256|S);sP(pop());const l=pop();pc=l|pop()<<8;return}
+    rd(pc);rd(256|S);const l=pop();pc=l|pop()<<8;rd(pc);pc=pc+1&0xffff;return}
+   if(b==3&&a==2){const l=f();pc=l|f()<<8;return}
+   if(b==3&&a==3){const l=f(),p=l|f()<<8,lo=rd(p);pc=lo|rd(p&0xff00|p+1&0xff)<<8;return}
+   const m=[2,1,0,3,0,5,0,7][b];
+   if(a==4){const ad=am(m,1);if(m==2)rd(ad);else if(b==7)shw(ad,Y);else wr(ad,Y);return}
+   const ad=am(m,0),x=rd(ad);
+   if(a==1&&(b==1||b==3)){fZ=A&x?0:1;fN=x>>7&1;fV=x>>6&1}else if(a==5)Y=nz(x);else if(a==6&&b<4)cmp(Y,x);else if(a==7&&b<4)cmp(X,x);
+   return}
+  // 非官方指令
+  if(b==2){const ad=am(2,0),x=rd(ad);switch(a){case 0:case 1:A=nz(A&x);fC=A>>7;break;case 2:A=nz(shf(2,A&x));break;case 3:A&=x;A=A>>1|fC<<7;nz(A);fC=A>>6&1;fV=(A>>6^A>>5)&1;break;case 4:A=nz((A|0xee)&X&x);break;case 5:A=X=nz((A|0xee)&x);break;case 6:{const s=(A&X)-x;fC=s>=0?1:0;X=nz(s&255);break}default:adc(x^255)}return}
+  const m=b==0?0:b==1?1:b==3?3:b==4?4:b==5?(a==4||a==5?8:5):b==6?6:(a==4||a==5?6:7),ad=am(m,a!=5);
+  if(a==4){const q=A&X;if(b==4||b==7)shw3(ad,q);else if(b==6){S=q;shw3(ad,S)}else wr(ad,q);return}
+  if(a==5){const x=rd(ad);if(b==6){A=X=nz(x&S);S=A}else A=X=nz(x);return}
+  const x=rd(ad);let r;wr(ad,x);
+  if(a==0){r=shf(0,x);A=nz(A|r)}else if(a==1){r=shf(1,x);A=nz(A&r)}else if(a==2){r=shf(2,x);A=nz(A^r)}else if(a==3){r=shf(3,x);adc(r)}else if(a==6){r=x-1&255;cmp(A,r)}else{r=x+1&255;adc(r^255)}
+  wr(ad,r)};
+
+ fI=1;pc=bus(0xfffc)|bus(0xfffd)<<8;
+ for(let i=0;i<7;i++){ppu(3);cyc++;APU.cyc()}
+ return{set:p=>pad=p,dbg:()=>pc,frame(){
+  fd=0;while(!fd)step();
+  // 防卡死：連續約 2 秒瘋狂輪詢 $2002 卻等不到旗標，就強制給出旗標讓測試繼續（該測試會顯示 FAIL）
+  if(r2>3000){if(++stk>=120){st|=0xc0;updNmi();stk=0}}else stk=0;
+  r2=0}};
+}
+
+const LEN=[10,254,20,2,40,4,80,6,160,8,60,10,14,12,26,14,12,16,24,18,48,20,96,22,192,24,72,26,16,28,32,30],
+DUTY=[[0,1,0,0,0,0,0,0],[0,1,1,0,0,0,0,0],[0,1,1,1,1,0,0,0],[1,0,0,1,1,1,1,1]],
+NP=[4,8,16,32,64,96,128,160,202,254,380,508,762,1016,2034,4068],
+DR=[428,380,340,320,286,254,226,214,190,160,142,128,106,84,72,54];
+const APU=(()=>{
+ let ac=null,sr=44100,ring=new Float32Array(32768),rp=0,wp=0,fr=0,ch=[],cc=0,sc=0,dl=[];
+ let fcc=0,fm=0,inh=0,fIrq=0,fwd=0,fnv=0,dm={};
+ const A={il:0,dm:null};
+ const mk=()=>({en:0,len:0,duty:0,halt:0,nh:0,lr:0,lp:0,cv:0,vol:0,ev:0,ec:0,es:0,tm:0,ph:0,swE:0,swP:0,swS:0,swN:0,swR:0,swC:0,lin:0,linR:0,rl:0,mode:0,per:4,lf:1,lv:0});
+ const env=c=>{if(c.es){c.es=0;c.ev=15;c.ec=c.vol}else if(c.ec>0)c.ec--;else{c.ec=c.vol;if(c.ev>0)c.ev--;else if(c.halt)c.ev=15}};
+ const lc=c=>{if(!c.halt&&c.len>0)c.len--};
+ const sw=(c,i)=>{const d=c.tm>>c.swS,g=c.swN?c.tm-d-(1-i):c.tm+d;if(!c.swC&&c.swE&&c.swS&&c.tm>=8&&g<2048)c.tm=g;if(!c.swC||c.swR){c.swC=c.swP;c.swR=0}else c.swC--};
+ const qf=()=>{env(ch[0]);env(ch[1]);env(ch[3]);const t=ch[2];if(t.rl)t.lin=t.linR;else if(t.lin>0)t.lin--;if(!t.halt)t.rl=0};
+ const hf=()=>{ch.forEach(c=>lc(c));sw(ch[0],0);sw(ch[1],1)};
+ const need=()=>{if(!dm.hb&&dm.rem>0)dm.req=1};
+ const pul=c=>{c.ph=(c.ph+1789773/(16*(c.tm+1))/sr)%1;const g=c.tm+(c.tm>>c.swS);return c.len&&c.tm>=8&&(c.swN||g<2048)&&DUTY[c.duty][c.ph*8|0]?(c.cv?c.vol:c.ev):0};
+ const tri=c=>{c.ph=(c.ph+1789773/(32*(c.tm+1))/sr)%1;if(c.len&&c.lin&&c.tm>1){const s=c.ph*32|0;c.lv=s<16?15-s:s-16}return c.lv};
+ const noi=c=>{c.ph+=1789773/c.per/sr;while(c.ph>=1){c.ph--;const b=(c.lf^c.lf>>(c.mode?6:1))&1;c.lf=c.lf>>1|b<<14}return c.len&&!(c.lf&1)?(c.cv?c.vol:c.ev):0};
+ const smp=d=>{const a=pul(ch[0])+pul(ch[1]),t=tri(ch[2]),n=noi(ch[3]);return((a?95.88/(8128/a+100):0)+(t+n+d?159.79/(1/(t/8227+n/12241+d/22638)+100):0))*0.8};
+ return Object.assign(A,{
+  init(){ch=[mk(),mk(),mk(),mk()];cc=0;fcc=0;fm=0;inh=0;fIrq=0;fwd=0;dl=[];A.il=0;
+   dm={lvl:0,per:DR[0]-1,tm:0,loop:0,irqE:0,irq:0,addr:0xc000,len:1,cur:0xc000,rem:0,buf:0,hb:0,sh:0,bits:8,sil:1,dly:0,req:0};A.dm=dm},
+  start(){if(ac)return ac.resume();ac=new AudioContext();sr=ac.sampleRate;const sp=ac.createScriptProcessor(2048,0,1);
+   sp.onaudioprocess=e=>{const o=e.outputBuffer.getChannelData(0);for(let i=0;i<o.length;i++){if(rp!=wp){o[i]=ring[rp];rp=rp+1&32767}else o[i]=0}};sp.connect(ac.destination)},
+  // 每個 CPU 週期呼叫一次
+  cyc(){
+   if(!ch.length)return;
+   cc++;
+   if(fwd&&--fwd==0){fm=fnv;fcc=0;if(fm){qf();hf()}}
+   else{
+    fcc++;
+    if(fcc==7457)qf();
+    else if(fcc==14913){qf();hf()}
+    else if(fcc==22371)qf();
+    else if(fm==0){
+     if(fcc==29828){if(!inh)fIrq=1}
+     else if(fcc==29829){qf();hf();if(!inh)fIrq=1}
+     else if(fcc==29830){if(!inh)fIrq=1;fcc=0}
+    }else if(fcc==37281){qf();hf()}
+    else if(fcc==37282)fcc=0}
+   for(let i=0;i<4;i++){const c=ch[i];c.halt=c.nh;if(c.lr){if(c.len==c.lp)c.len=c.lr;c.lr=0}}
+   if(dm.dly&&--dm.dly==0)need();
+   if(dm.tm==0){dm.tm=dm.per;
+    if(!dm.sil){if(dm.sh&1){if(dm.lvl<=125)dm.lvl+=2}else if(dm.lvl>=2)dm.lvl-=2;dm.sh>>=1}
+    if(--dm.bits==0){dm.bits=8;if(dm.hb){dm.sil=0;dm.sh=dm.buf;dm.hb=0;need()}else dm.sil=1}
+   }else dm.tm--;
+   A.il=fIrq|dm.irq;
+   if(ac){sc+=sr;if(sc>=1789773){sc-=1789773;dl.push(dm.lvl)}}
+  },
+  // DMC DMA 取得的一個位元組
+  load(b){dm.buf=b;dm.hb=1;dm.req=0;dm.cur=dm.cur==0xffff?0x8000:dm.cur+1;
+   if(--dm.rem==0){if(dm.loop){dm.cur=dm.addr;dm.rem=dm.len}else if(dm.irqE)dm.irq=1}
+   A.il=fIrq|dm.irq},
+  w(a,v){
+   if(!ch.length)return;
+   if(a==0x4015){ch.forEach((c,k)=>{c.en=v>>k&1;if(!c.en)c.len=0});dm.irq=0;
+    if(v&16){if(dm.rem==0){dm.cur=dm.addr;dm.rem=dm.len;dm.dly=cc&1?2:3}}else{if(dm.req)dm.abort=1;dm.rem=0}
+    A.il=fIrq;return}
+   if(a==0x4017){inh=v>>6&1;if(inh)fIrq=0;fnv=v>>7&1;fwd=cc&1?3:4;A.il=fIrq|dm.irq;return}
+   if(a==0x4010){dm.irqE=v>>7;dm.loop=v>>6&1;dm.per=DR[v&15]-1;if(!dm.irqE)dm.irq=0;A.il=fIrq|dm.irq;return}
+   if(a==0x4011){dm.lvl=v&127;return}
+   if(a==0x4012){dm.addr=0xc000|v<<6;return}
+   if(a==0x4013){dm.len=v<<4|1;return}
+   if(a>0x400f)return;
+   const i=a>>2&3,c=ch[i],r=a&3;
+   if(r==0){if(i==2){c.nh=v>>7;c.linR=v&127}else{c.duty=v>>6;c.nh=v>>5&1;c.cv=v>>4&1;c.vol=v&15}}
+   else if(r==1){if(i<2){c.swE=v>>7;c.swP=v>>4&7;c.swN=v>>3&1;c.swS=v&7;c.swR=1}}
+   else if(r==2){if(i==3){c.mode=v>>7;c.per=NP[v&15]}else c.tm=c.tm&0x700|v}
+   else{if(i<3)c.tm=c.tm&255|(v&7)<<8;if(c.en){c.lr=LEN[v>>3];c.lp=c.len}c.es=1;c.rl=1;if(i<2)c.ph=0}},
+  r(){if(!ch.length)return 0;let s=0;for(let k=0;k<4;k++)if(ch[k].len>0)s|=1<<k;if(dm.rem>0)s|=16;if(fIrq)s|=64;if(dm.irq)s|=128;fIrq=0;A.il=dm.irq;return s},
+  gen(){
+   if(!ac||!ch.length)return;
+   const n=sr/60+fr,k=n|0;fr=n-k;
+   for(let i=0;i<k;i++){
+    const d=dl.length?dl[Math.min(i,dl.length-1)]:dm.lvl,s=smp(d);
+    if(((wp-rp)&32767)<6000){ring[wp]=s;wp=wp+1&32767}}
+   dl=[]}});
+})();
+let tp=0,fname='',fc=0;
+document.querySelectorAll('.tp b').forEach(e=>{const m=+e.dataset.b,on=x=>{x.preventDefault();tp|=m},off=x=>{x.preventDefault();tp&=~m};e.onpointerdown=on;e.onpointerup=e.onpointerleave=e.onpointercancel=off;e.oncontextmenu=x=>x.preventDefault()});
+let nes=null,last=0,acc=0,pad=0;
+async function load(f){try{APU.start();APU.init();nes=NES(new Uint8Array(await f.arrayBuffer()));fname=f.name;$('msg').textContent='執行中：'+fname}catch(e){$('msg').textContent='❌ '+e.message}}
+$('f').onchange=e=>e.target.files[0]&&load(e.target.files[0]);
+addEventListener('dragover',e=>e.preventDefault());
+addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer.files[0];f&&load(f)});
+const KEYS={KeyX:1,KeyZ:2,ShiftLeft:4,ShiftRight:4,Enter:8,ArrowUp:16,ArrowDown:32,ArrowLeft:64,ArrowRight:128};
+addEventListener('keydown',e=>{if(KEYS[e.code]){pad|=KEYS[e.code];e.preventDefault()}});
+addEventListener('keyup',e=>{if(KEYS[e.code]){pad&=~KEYS[e.code];e.preventDefault()}});
+function loop(ts){
+ requestAnimationFrame(loop);
+ acc=Math.min(acc+ts-last,100);last=ts;
+ if(!nes)return;
+ let d=0;
+ try{while(acc>=16.64){nes.set(pad|tp);nes.frame();APU.gen();acc-=16.64;d=1}}
+ catch(e){console.error(e);$('msg').textContent='❌ 執行錯誤：'+e.message+'（PC=$'+nes.dbg().toString(16).toUpperCase()+'）';nes=null;acc=0;return}
+ if(d){cx.putImageData(img,0,0);if(++fc%30==0)$('msg').textContent='執行中：'+fname+'　PC=$'+nes.dbg().toString(16).toUpperCase().padStart(4,'0')}
+}
+requestAnimationFrame(loop);
+</script></body></html>
