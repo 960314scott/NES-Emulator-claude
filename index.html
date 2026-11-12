@@ -13,12 +13,34 @@ p{margin:0;font-size:14px;opacity:.8;text-align:center;max-width:640px}
 .tp div{display:grid;gap:6px}.d{grid-template-columns:repeat(3,52px)}
 .tp b{display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:50%;background:var(--fg);color:var(--bg);opacity:.35;font-size:14px}
 .tp b:active{opacity:.7}.tp .w{border-radius:12px;width:64px;height:36px}
+.tas{width:min(100%,768px);border:1px solid #8886;border-radius:8px;padding:6px 12px;box-sizing:border-box}
+.tas summary{cursor:pointer;font-weight:600;padding:4px 0}
+.tas .r{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:6px 0;font-size:14px}
+.tas button,.tas select{font:inherit;font-size:14px;padding:6px 10px;border-radius:6px;border:1px solid #8888;background:var(--bg);color:var(--fg);cursor:pointer}
+.tas button:active{background:var(--ac);color:#fff}
+.tas .btn{padding:6px 10px;font-size:14px}
+#hud,#inp{font:13px ui-monospace,Menlo,Consolas,monospace;margin:4px 0;word-break:break-all}
+#roll{overflow-x:auto;user-select:none;-webkit-user-select:none;margin-top:6px}
+.rr{display:grid;grid-template-columns:52px repeat(8,minmax(28px,1fr));font:12px ui-monospace,Menlo,Consolas,monospace;text-align:center;min-width:360px}
+.rr i{font-style:normal;opacity:.7;padding:1px 4px;text-align:right}
+.rr b{font-weight:400;border:1px solid #8883;min-height:18px;cursor:pointer;line-height:18px}
+.rr.h b{cursor:default;border:0;font-size:11px;opacity:.7}
+.rr b.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.rr.past{opacity:.55}.rr.cur{outline:2px solid var(--ac);outline-offset:-1px}
 </style></head><body>
 <h1>NES 模擬器・逐週期架構</h1>
 <canvas id="c" width="256" height="240"></canvas>
 <label class="btn">載入 ROM（.nes）<input type="file" id="f" accept=".nes" hidden></label>
 <p id="msg">選擇或拖曳 .nes 檔案到此頁面（請使用你自己合法持有的 ROM）</p>
 <div class="tp"><div class="d"><i></i><b data-b="16">▲</b><i></i><b data-b="64">◀</b><i></i><b data-b="128">▶</b><i></i><b data-b="32">▼</b><i></i></div><div><b class="w" data-b="4">Select</b><b class="w" data-b="8">Start</b></div><div><b data-b="2">B</b><b data-b="1">A</b></div></div>
+<details class="tas" id="tasBox" open><summary>TAS 工具（錄製・播放・逐幀・倒帶・存檔・編輯）</summary>
+<div class="r"><button id="bPause">⏸ 暫停 (P)</button><button id="bStep">⏭ 單幀 (.)</button><button id="bRew">⏪ 倒帶（按住／Backspace）</button><label>速度 <select id="sSpeed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option><option value="0">最快</option></select></label></div>
+<div class="r"><button id="bRecP">⏺ 從開機錄製</button><button id="bRecH">⏺ 從目前位置錄製</button><button id="bEdit">✎ 新建電影（逐幀編輯）</button><button id="bPlay">▶ 播放電影</button><button id="bStop">⏹ 停止</button></div>
+<div class="r"><label>存檔位 <select id="sSlot"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option></select></label><button id="bSave">💾 存檔 (F5)</button><button id="bLoad">📂 讀檔 (F7)</button><button id="bSaveF">匯出存檔</button><label class="btn">匯入存檔<input type="file" id="fState" hidden></label></div>
+<div class="r"><button id="bExp">匯出 .fm2</button><button id="bExpJ">匯出 .nestas</button><label class="btn">匯入電影<input type="file" id="fMov" accept=".fm2,.nestas,.json" hidden></label></div>
+<div id="hud">尚未載入 ROM</div><div id="inp"></div>
+<div id="roll"></div>
+<p style="text-align:left;max-width:none;font-size:12px">快速鍵：P 暫停、. 單幀、Backspace 倒帶、F5／F7 存讀檔、數字鍵 0–9 選存檔位。輸入表可直接點格子切換按鍵（暫停時可用滑鼠滾輪捲動），修改過去的幀會自動從最近的檢查點重新模擬。錄製時倒帶或讀檔會截斷電影並增加重錄次數。</p></details>
 <p>按鍵：方向鍵＝十字鍵，X＝A，Z＝B，Shift＝Select，Enter＝Start；手機可用螢幕按鈕<br>支援 Mapper 0、1、2、3、4、7、66，含音效（方波×2、三角波、噪音）</p>
 <script>
 const $=id=>document.getElementById(id);
@@ -68,7 +90,7 @@ function NES(rom){
  const sLo=[],sHi=[],sAt=[],sX=[];
  const prd=a=>{a&=0x3fff;if(a<0x2000)return chr[C[a>>10]+(a&1023)];if(a<0x3f00)return vram[nta[a>>10&3]<<10|a&1023];a&=31;if(!(a&3))a&=15;return pal[a]};
  const pwr=(a,q)=>{a&=0x3fff;if(a<0x2000){if(chrRam)chr[C[a>>10]+(a&1023)]=q}else if(a<0x3f00)vram[nta[a>>10&3]<<10|a&1023]=q;else{a&=31;if(!(a&3))a&=15;pal[a]=q}};
- const obT=new Array(8).fill(0),obv=()=>{for(let i=0;i<8;i++)if(cyc-obT[i]>1000000)ob&=~(1<<i);return ob};const updNmi=()=>{nmiO=st&128&&ctrl&128?1:0};
+ const obT=new Array(8).fill(0),obv=()=>{for(let i=0;i<8;i++)if(cyc-obT[i]>1000000)ob&=~(1<<i);return ob};const mh=[0,0,0,0,0,0,0,0];const updNmi=()=>{nmiO=st&128&&ctrl&128?1:0};
  const incX=()=>{if((v&31)==31)v=v&~31^0x400;else v++};
  const incY=()=>{if((v&0x7000)!=0x7000)v+=0x1000;else{v&=~0x7000;let y=(v&0x3e0)>>5;if(y==29){y=0;v^=0x800}else if(y==31)y=0;else y++;v=v&~0x3e0|y<<5}};
  const soam=new Uint8Array(32),tLo=[0,0,0,0,0,0,0,0],tHi=[0,0,0,0,0,0,0,0],tAt=[0,0,0,0,0,0,0,0],tX=[0,0,0,0,0,0,0,0];
@@ -96,18 +118,28 @@ function NES(rom){
    }
    oa=(aH<<2)+aL&255}
  };
+ const RV=new Uint8Array(256);for(let i=0;i<256;i++){let r=0;for(let j=0;j<8;j++)r|=(i>>j&1)<<(7-j);RV[i]=r}
+ const sAct=[0,0,0,0,0,0,0,0];
  const ldSpr=pr=>{
-  const b=si*4,y=soam[b],ti=soam[b+1],at=soam[b+2],x=soam[b+3],h=ctrl&32?16:8,scn=pr?-1:sl;
-  const lo=at&128?h-1-(scn-y):scn-y;
-  const ta=h==16?((ti&1?4096:0)|(ti&254)<<4)+(lo>=8?lo+8:lo):((ti<<4)|(ctrl&8?4096:0))+lo;
-  if(si<scnt&&y<240){tAt[si]=at;tX[si]=x;tLo[si]=prd(ta);tHi[si]=prd(ta+8)}else prd(ta);
+  const b=si*4,y=soam[b],ti=soam[b+1],at=soam[b+2],x=soam[b+3],h=ctrl&32?16:8,scn=pr?5:sl,row=scn-y&255;
+  let lo=0,hi=0;
+  if(si<scnt&&row<h){
+   const r=at&128?h-1-row:row;
+   const ta=h==16?((ti&1?4096:0)|(ti&254)<<4)+(r>=8?r+8:r):((ti<<4)|(ctrl&8?4096:0))+(r&7);
+   lo=prd(ta);hi=prd(ta+8);
+   if(at&64){lo=RV[lo];hi=RV[hi]}
+  }
+  tAt[si]=at;tX[si]=x;tLo[si]=lo;tHi[si]=hi;
   si++};
  const incV=()=>{if(mask&24&&(sl<240||sl==261)){incX();incY()}else v=v+(ctrl&4?32:1)&0x7fff};
  const pixel=x=>{
   let bp=0,bpal=0,sp=0,spal=0,pri=0,s0=0;
   if(mask&8&&(x>7||mask&2)){const m=0x8000>>fx;bp=(bgL&m?1:0)|(bgH&m?2:0);bpal=(atL&m?1:0)|(atH&m?2:0)}
-  if(mask&16&&(x>7||mask&4)){
-   for(let k=0;k<scnt;k++){const d=x-tX[k];if(d>=0&&d<8){const b=tAt[k]&64?d:7-d,c=tLo[k]>>b&1|(tHi[k]>>b&1)<<1;if(c){sp=c;spal=4|tAt[k]&3;pri=tAt[k]&32;s0=k==0&&s0v;break}}}}
+  for(let k=0;k<8;k++){
+   if(!sAct[k]){if(tX[k]==0)sAct[k]=1;else tX[k]--}
+   if(sAct[k]){
+    if(!sp&&mask&16&&(x>7||mask&4)){const c=tLo[k]>>7&1|(tHi[k]>>7&1)<<1;if(c){sp=c;spal=4|tAt[k]&3;pri=tAt[k]&32;s0=k==0&&s0v}}
+    if(mask&24){tLo[k]=tLo[k]<<1&255;tHi[k]=tHi[k]<<1&255}}}
   if(s0&&bp&&x<255)st|=0x40;
   let ci=bp?bpal<<2|bp:0;
   if(sp&&(!bp||!pri))ci=spal<<2|sp;
@@ -115,11 +147,11 @@ function NES(rom){
   fb[sl*256+x]=PAL[c&63];
  };
  const ppuDot=()=>{
-  const rn=mask&24,vis=sl<240,pre=sl==261;
+  mh.pop();mh.unshift(mask);const rn=mh[4]&24,rnS=mask&24,vis=sl<240,pre=sl==261;
   if(vis||pre){
+   if(rnS&&(dot>1&&dot<258||dot>320&&dot<338)){bgL=bgL<<1&65535;bgH=bgH<<1&65535|1;atL=atL<<1&65535;atH=atH<<1&65535}
    if(rn){
     if(dot>1&&dot<258||dot>320&&dot<338){
-     bgL=bgL<<1&65535;bgH=bgH<<1&65535;atL=atL<<1&65535;atH=atH<<1&65535;
      switch(dot-1&7){
       case 0:bgL=bgL&0xff00|nLo;bgH=bgH&0xff00|nHi;atL=atL&0xff00|(nAt&1?255:0);atH=atH&0xff00|(nAt&2?255:0);nId=prd(0x2000|v&0xfff);break;
       case 2:{let a=prd(0x23c0|v&0xc00|v>>4&0x38|v>>2&7);if(v>>5&2)a>>=4;if(v&2)a>>=2;nAt=a&3;break}
@@ -133,6 +165,7 @@ function NES(rom){
     if(dot>256&&dot<321){oa=0;if((dot-260)%8==0)ldSpr(pre);else if((dot-257)%8==0||(dot-259)%8==0)prd(0x2000|v&0xfff)}
     if(dot==260&&mp==4){if(!ic)ic=il;else ic--;if(!ic&&ie)irq=1}
     if(pre&&dot>279&&dot<305)v=v&~0x7be0|t&0x7be0;
+    if(dot==339)for(let k=0;k<8;k++)sAct[k]=0;
    }
    if(vis&&dot>0&&dot<257)pixel(dot-1);
    if(pre&&dot==1){st&=0x1f;updNmi()}
@@ -263,7 +296,9 @@ function NES(rom){
 
  fI=1;pc=bus(0xfffc)|bus(0xfffd)<<8;
  for(let i=0;i<7;i++){ppu(3);cyc++;APU.cyc()}
- return{set:p=>pad=p,dbg:()=>pc,frame(){
+ const snap=()=>({sr,mc,c0,c1,pb,bs,il,ic,ie,irq,ctrl,mask,st,oa,v,t,fx,w,buf,ob,sl,dot,odd,fd,nmiO,nmiE,nmiP,noV,bgL,bgH,atL,atH,nId,nAt,nLo,nHi,sn,s0c,r2,stk,n0,sa,aH0,cp,inR,aH,aL,cdn,ovb,s0a,s0v,scnt,si,pad,sh,stb,db,dmaP,inDma,oamReq,oamSrc,lastRdDma,dumDma,pc,A,X,Y,S,fN,fV,fZ,fC,fI,fD,cyc,pol,pol0,bh,cr,ram:ram.slice(),prgRam:prgRam.slice(),vram:vram.slice(),oam:oam.slice(),pal:pal.slice(),soam:soam.slice(),chrR:chrRam?chr.slice():null,P:P.slice(),C:C.slice(),tLo:tLo.slice(),tHi:tHi.slice(),tAt:tAt.slice(),tX:tX.slice(),sAct:sAct.slice(),mh:mh.slice(),obT:obT.slice(),rg:rg.slice(),nta:nta.slice()});
+ const load=o=>{({sr,mc,c0,c1,pb,bs,il,ic,ie,irq,ctrl,mask,st,oa,v,t,fx,w,buf,ob,sl,dot,odd,fd,nmiO,nmiE,nmiP,noV,bgL,bgH,atL,atH,nId,nAt,nLo,nHi,sn,s0c,r2,stk,n0,sa,aH0,cp,inR,aH,aL,cdn,ovb,s0a,s0v,scnt,si,pad,sh,stb,db,dmaP,inDma,oamReq,oamSrc,lastRdDma,dumDma,pc,A,X,Y,S,fN,fV,fZ,fC,fI,fD,cyc,pol,pol0,bh,cr}=o);ram.set(o.ram);prgRam.set(o.prgRam);vram.set(o.vram);oam.set(o.oam);pal.set(o.pal);soam.set(o.soam);if(o.chrR)chr.set(o.chrR);for(let i=0;i<P.length;i++)P[i]=o.P[i];for(let i=0;i<C.length;i++)C[i]=o.C[i];for(let i=0;i<tLo.length;i++)tLo[i]=o.tLo[i];for(let i=0;i<tHi.length;i++)tHi[i]=o.tHi[i];for(let i=0;i<tAt.length;i++)tAt[i]=o.tAt[i];for(let i=0;i<tX.length;i++)tX[i]=o.tX[i];for(let i=0;i<sAct.length;i++)sAct[i]=o.sAct[i];for(let i=0;i<mh.length;i++)mh[i]=o.mh[i];for(let i=0;i<obT.length;i++)obT[i]=o.obT[i];rg=o.rg.slice();nta=o.nta.slice()};
+ return{snap,load,set:p=>pad=p,dbg:()=>pc,frame(){
   fd=0;while(!fd)step();
   // 防卡死：連續約 2 秒瘋狂輪詢 $2002 卻等不到旗標，就強制給出旗標讓測試繼續（該測試會顯示 FAIL）
   if(r2>3000){if(++stk>=120){st|=0xc0;updNmi();stk=0}}else stk=0;
@@ -276,7 +311,7 @@ NP=[4,8,16,32,64,96,128,160,202,254,380,508,762,1016,2034,4068],
 DR=[428,380,340,320,286,254,226,214,190,160,142,128,106,84,72,54];
 const APU=(()=>{
  let ac=null,sr=44100,ring=new Float32Array(32768),rp=0,wp=0,fr=0,ch=[],cc=0,sc=0,dl=[];
- let fcc=0,fm=0,inh=0,fIrq=0,fwd=0,fnv=0,dm={};
+ let fcc=0,fm=0,inh=0,fIrq=0,fclr=0,fwd=0,fnv=0,dm={};
  const A={il:0,dm:null};
  const mk=()=>({en:0,len:0,duty:0,halt:0,nh:0,lr:0,lp:0,cv:0,vol:0,ev:0,ec:0,es:0,tm:0,ph:0,swE:0,swP:0,swS:0,swN:0,swR:0,swC:0,lin:0,linR:0,rl:0,mode:0,per:4,lf:1,lv:0});
  const env=c=>{if(c.es){c.es=0;c.ev=15;c.ec=c.vol}else if(c.ec>0)c.ec--;else{c.ec=c.vol;if(c.ev>0)c.ev--;else if(c.halt)c.ev=15}};
@@ -290,7 +325,9 @@ const APU=(()=>{
  const noi=c=>{c.ph+=1789773/c.per/sr;while(c.ph>=1){c.ph--;const b=(c.lf^c.lf>>(c.mode?6:1))&1;c.lf=c.lf>>1|b<<14}return c.len&&!(c.lf&1)?(c.cv?c.vol:c.ev):0};
  const smp=d=>{const a=pul(ch[0])+pul(ch[1]),t=tri(ch[2]),n=noi(ch[3]);return((a?95.88/(8128/a+100):0)+(t+n+d?159.79/(1/(t/8227+n/12241+d/22638)+100):0))*0.8};
  return Object.assign(A,{
-  init(){ch=[mk(),mk(),mk(),mk()];cc=0;fcc=0;fm=0;inh=0;fIrq=0;fwd=0;dl=[];A.il=0;
+  asnap(){return{ch:JSON.parse(JSON.stringify(ch)),dm:Object.assign({},dm),cc,fcc,fm,inh,fIrq,fclr,fwd,fnv,il:A.il}},
+  aload(o){ch=JSON.parse(JSON.stringify(o.ch));dm=Object.assign({},o.dm);A.dm=dm;cc=o.cc;fcc=o.fcc;fm=o.fm;inh=o.inh;fIrq=o.fIrq;fclr=o.fclr;fwd=o.fwd;fnv=o.fnv;A.il=o.il},
+  init(){ch=[mk(),mk(),mk(),mk()];cc=0;fcc=0;fm=0;inh=0;fIrq=0;fclr=0;fwd=0;dl=[];A.il=0;
    dm={lvl:0,per:DR[0]-1,tm:0,loop:0,irqE:0,irq:0,addr:0xc000,len:1,cur:0xc000,rem:0,buf:0,hb:0,sh:0,bits:8,sil:1,dly:0,req:0};A.dm=dm},
   start(){if(ac)return ac.resume();ac=new AudioContext();sr=ac.sampleRate;const sp=ac.createScriptProcessor(2048,0,1);
    sp.onaudioprocess=e=>{const o=e.outputBuffer.getChannelData(0);for(let i=0;i<o.length;i++){if(rp!=wp){o[i]=ring[rp];rp=rp+1&32767}else o[i]=0}};sp.connect(ac.destination)},
@@ -310,6 +347,7 @@ const APU=(()=>{
      else if(fcc==29830){if(!inh)fIrq=1;fcc=0}
     }else if(fcc==37281){qf();hf()}
     else if(fcc==37282)fcc=0}
+   if(fclr&&!(cc&1)){fIrq=0;fclr=0}
    for(let i=0;i<4;i++){const c=ch[i];c.halt=c.nh;if(c.lr){if(c.len==c.lp)c.len=c.lr;c.lr=0}}
    if(dm.dly&&--dm.dly==0)need();
    if(dm.tm==0){dm.tm=dm.per;
@@ -339,7 +377,7 @@ const APU=(()=>{
    else if(r==1){if(i<2){c.swE=v>>7;c.swP=v>>4&7;c.swN=v>>3&1;c.swS=v&7;c.swR=1}}
    else if(r==2){if(i==3){c.mode=v>>7;c.per=NP[v&15]}else c.tm=c.tm&0x700|v}
    else{if(i<3)c.tm=c.tm&255|(v&7)<<8;if(c.en){c.lr=LEN[v>>3];c.lp=c.len}c.es=1;c.rl=1;if(i<2)c.ph=0}},
-  r(){if(!ch.length)return 0;let s=0;for(let k=0;k<4;k++)if(ch[k].len>0)s|=1<<k;if(dm.rem>0)s|=16;if(fIrq)s|=64;if(dm.irq)s|=128;fIrq=0;A.il=dm.irq;return s},
+  r(){if(!ch.length)return 0;let s=0;for(let k=0;k<4;k++)if(ch[k].len>0)s|=1<<k;if(dm.rem>0)s|=16;if(fIrq)s|=64;if(dm.irq)s|=128;fclr=1;return s},
   gen(){
    if(!ac||!ch.length)return;
    const n=sr/60+fr,k=n|0;fr=n-k;
@@ -350,22 +388,142 @@ const APU=(()=>{
 })();
 let tp=0,fname='',fc=0;
 document.querySelectorAll('.tp b').forEach(e=>{const m=+e.dataset.b,on=x=>{x.preventDefault();tp|=m},off=x=>{x.preventDefault();tp&=~m};e.onpointerdown=on;e.onpointerup=e.onpointerleave=e.onpointercancel=off;e.oncontextmenu=x=>x.preventDefault()});
+// ===== 入力・TAS 工具 =====
 let nes=null,last=0,acc=0,pad=0;
-async function load(f){try{APU.start();APU.init();nes=NES(new Uint8Array(await f.arrayBuffer()));fname=f.name;$('msg').textContent='執行中：'+fname}catch(e){$('msg').textContent='❌ '+e.message}}
+const BN=['A','B','Select','Start','↑','↓','←','→'],FMC='RLDUTSBA';
+const T={rom:null,romName:'',frame:0,mode:'free',mov:[],anchor:null,rerec:0,paused:false,speed:1,step:0,rew:false,slot:0,slots:[],ring:[],gz:new Map(),lastInp:0,tl:false};
+const info=m=>{$('msg').textContent=m};
+const snapAll=()=>({c:nes.snap(),a:APU.asnap(),f:T.frame});
+const restore=s=>{nes.load(s.c);APU.aload(s.a);T.frame=s.f};
+const purge=()=>{for(const k of [...T.gz.keys()])if(k>T.frame)T.gz.delete(k)};
+function power(){APU.init();nes=NES(T.rom);T.frame=0;T.ring.length=0;T.gz.clear();T.gz.set(0,snapAll())}
+function trunc(){if(T.mode==='rec'){T.mov.length=Math.min(T.mov.length,T.frame);T.rerec++;purge()}}
+function runFrame(keep,audio){
+ const f=T.frame;let inp;
+ if(T.mode==='play'){if(f>=T.mov.length){T.mode='free';T.paused=true;info('電影播放完畢');return false}inp=T.mov[f]}
+ else if(T.mode==='edit'){while(T.mov.length<=f)T.mov.push(0);inp=T.mov[f]}
+ else{inp=pad|tp;if(T.mode==='rec')T.mov[f]=inp;else T.tl=false}
+ if(T.mode!=='free'&&f%20==0&&!T.gz.has(f))T.gz.set(f,snapAll());
+ if(keep){T.ring.push({s:snapAll(),inp});if(T.ring.length>600)T.ring.shift()}else T.ring.length=0;
+ nes.set(inp);nes.frame();T.frame++;T.lastInp=inp;
+ if(audio)APU.gen();
+ return true}
+function rewTick(){
+ const e=T.ring.pop();if(!e)return false;
+ restore(e.s);nes.set(e.inp);nes.frame();restore(e.s);
+ if(T.mode==='rec'){T.mov.length=Math.min(T.mov.length,T.frame);purge()}
+ return true}
+function seekTo(tgt){
+ let bk=0;for(const k of T.gz.keys())if(k<=tgt&&k>bk)bk=k;
+ restore(T.gz.get(bk));
+ while(T.frame<tgt){const f=T.frame;if(f%20==0&&!T.gz.has(f))T.gz.set(f,snapAll());nes.set(T.mov[f]||0);nes.frame();T.frame++}
+ T.ring.length=0}
+function editCell(f,b){
+ if(f<0||!nes)return false;
+ if(!T.tl&&f<T.frame){info('目前狀態已脫離電影時間線，請先「播放電影」或「新建電影」');return false}
+ while(T.mov.length<=f)T.mov.push(0);T.mov[f]^=1<<b;
+ for(const k of [...T.gz.keys()])if(k>f)T.gz.delete(k);
+ if(f<T.frame)seekTo(T.frame);
+ return true}
+function startRec(fromPower){
+ if(!nes)return;
+ if(fromPower){power();T.anchor=null}
+ else{const a=snapAll();a.f=0;T.anchor=a;T.frame=0;T.ring.length=0;T.gz.clear();T.gz.set(0,a)}
+ Object.assign(T,{mov:[],rerec:0,mode:'rec',paused:false,tl:true})}
+function startPlay(){
+ if(!nes||!T.mov.length)return info('沒有可播放的電影');
+ if(T.anchor)restore(T.anchor);else power();
+ T.ring.length=0;T.gz.clear();T.gz.set(0,snapAll());Object.assign(T,{mode:'play',paused:false,tl:true})}
+function newEdit(){if(!nes)return;power();T.anchor=null;Object.assign(T,{mov:[],rerec:0,mode:'edit',paused:true,tl:true})}
+function saveSlot(i){T.slots[i]={s:snapAll(),img:fb.slice()};info('已存入存檔位 '+i)}
+function loadSlot(i){
+ const e=T.slots[i];if(!e)return info('存檔位 '+i+' 是空的');
+ restore(e.s);fb.set(e.img);T.ring.length=0;if(T.mode==='free')T.tl=false;trunc();cx.putImageData(img,0,0);info('已讀取存檔位 '+i)}
+// 檔案格式
+const b64=u=>{let s='';for(let i=0;i<u.length;i+=8192)s+=String.fromCharCode.apply(null,u.subarray(i,i+8192));return btoa(s)};
+const unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+const ser=o=>JSON.stringify(o,(k,v)=>ArrayBuffer.isView(v)?{__t:v.constructor.name,d:b64(new Uint8Array(v.buffer,v.byteOffset,v.byteLength))}:v);
+const de=s=>JSON.parse(s,(k,v)=>v&&v.__t?new (v.__t==='Uint32Array'?Uint32Array:Uint8Array)(unb64(v.d).buffer):v);
+function toFM2(){
+ const L=['version 3','emuVersion 22020','rerecordCount '+T.rerec,'palFlag 0','romFilename '+T.romName.replace(/\.nes$/i,''),'comment author NES-Emulator','fourscore 0','microphone 0','port0 1','port1 0','port2 0','FDS 0','NewPPU 0'];
+ for(const v of T.mov){let a='';for(let i=0;i<8;i++)a+=(v>>(7-i)&1)?FMC[i]:'.';L.push('|0|'+a+'|........||')}
+ return L.join('\n')+'\n'}
+function fromFM2(txt){
+ const mov=[];let rr=0;
+ for(const ln of txt.split(/\r?\n/)){
+  if(ln[0]==='|'){const f=ln.split('|')[2]||'';let v=0;for(let i=0;i<8;i++){const c=f[i];if(c&&c!=='.'&&c!==' ')v|=1<<(7-i)}mov.push(v)}
+  else if(ln.startsWith('rerecordCount'))rr=+ln.split(' ')[1]||0}
+ return{mov,rr}}
+function dl(name,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000)}
+function importMovie(txt){
+ if(txt.trim()[0]==='{'){const o=de(txt);T.mov=Array.from(unb64(o.mov));T.anchor=o.anchor||null;T.rerec=o.rerec||0}
+ else{const r=fromFM2(txt);T.mov=r.mov;T.rerec=r.rr;T.anchor=null}
+ Object.assign(T,{mode:'free',tl:false});info('已匯入電影：'+T.mov.length+' 幀（按「播放電影」從頭播放）')}
+// 介面
+const RR=17,roll=$('roll');let rollC=0,rollOpen=false;
+function buildRoll(){roll.innerHTML='<div class="rr h"><i>幀</i>'+BN.map(n=>'<b>'+n+'</b>').join('')+'</div>'+('<div class="rr"><i></i>'+BN.map((n,b)=>'<b data-b="'+b+'"></b>').join('')+'</div>').repeat(RR)}
+function drawRoll(){
+ const c=T.paused?rollC:T.frame;
+ for(let r=0;r<RR;r++){
+  const f=c-8+r,d=roll.children[r+1];
+  if(f<0){d.style.visibility='hidden';continue}
+  d.style.visibility='';d.dataset.f=f;d.firstChild.textContent=f;d.className='rr'+(f==T.frame?' cur':f<T.frame?' past':'');
+  const v=T.mov[f]||0;for(let b=0;b<8;b++)d.children[b+1].className=(v>>b&1)?'on':''}}
+function hud(){
+ const m={free:'自由',rec:'錄製中 ●',play:'播放中 ▶',edit:'編輯'}[T.mode];
+ $('hud').textContent=m+'　幀 '+T.frame+'／'+T.mov.length+'　重錄 '+T.rerec+'　'+(T.paused?'已暫停':(T.speed?T.speed+'×':'最快'))+(T.mode!=='free'||T.tl?'':'　（自由遊玩中）');
+ const v=T.lastInp;$('inp').textContent=BN.map((n,b)=>(v>>b&1)?n:'·').join(' ')}
+function setPause(p){T.paused=p;rollC=T.frame;$('bPause').textContent=p?'▶ 繼續 (P)':'⏸ 暫停 (P)'}
+function ui(){
+ buildRoll();
+ $('bPause').onclick=()=>setPause(!T.paused);
+ $('bStep').onclick=()=>{if(!T.paused)setPause(true);T.step++;rollC=T.frame+1};
+ const rw=v=>{if(v&&T.mode==='rec')T.rerec++;T.rew=v};
+ $('bRew').onpointerdown=()=>rw(true);$('bRew').onpointerup=$('bRew').onpointerleave=()=>rw(false);
+ $('sSpeed').onchange=e=>{T.speed=+e.target.value;acc=0};
+ $('bRecP').onclick=()=>startRec(true);$('bRecH').onclick=()=>startRec(false);
+ $('bEdit').onclick=()=>{newEdit();setPause(true)};$('bPlay').onclick=startPlay;
+ $('bStop').onclick=()=>{T.mode='free'};
+ $('sSlot').onchange=e=>T.slot=+e.target.value;
+ $('bSave').onclick=()=>nes&&saveSlot(T.slot);$('bLoad').onclick=()=>nes&&loadSlot(T.slot);
+ $('bSaveF').onclick=()=>{const e=T.slots[T.slot];e?dl('slot'+T.slot+'.state',ser(e)):info('此存檔位是空的')};
+ $('fState').onchange=async e=>{const f=e.target.files[0];if(!f||!nes)return;try{T.slots[T.slot]=de(await f.text());loadSlot(T.slot)}catch(x){info('❌ 存檔格式錯誤')}};
+ $('bExp').onclick=()=>T.mov.length&&!T.anchor?dl((T.romName||'movie').replace(/\.nes$/i,'')+'.fm2',toFM2()):info(T.anchor?'從中途位置開始的電影請用 .nestas 匯出':'沒有電影可匯出');
+ $('bExpJ').onclick=()=>T.mov.length?dl((T.romName||'movie').replace(/\.nes$/i,'')+'.nestas',ser({nestas:1,rom:T.romName,rerec:T.rerec,mov:b64(Uint8Array.from(T.mov)),anchor:T.anchor})):info('沒有電影可匯出');
+ $('fMov').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{importMovie(await f.text())}catch(x){info('❌ 電影檔格式錯誤')}};
+ $('tasBox').ontoggle=e=>{rollOpen=e.target.open;if(rollOpen)drawRoll()};
+ roll.onclick=e=>{const b=e.target.dataset.b;if(b===undefined||!nes)return;const f=+e.target.parentNode.dataset.f;if(editCell(f,+b)){drawRoll();hud();cx.putImageData(img,0,0)}};
+ roll.onwheel=e=>{if(!T.paused)return;e.preventDefault();rollC=Math.max(0,rollC+(e.deltaY>0?3:-3));drawRoll()}}
+async function load(f){
+ try{T.rom=new Uint8Array(await f.arrayBuffer());T.romName=f.name;APU.start();power();Object.assign(T,{mode:'free',mov:[],anchor:null,rerec:0,tl:false,slots:[]});setPause(false);info('執行中：'+f.name)}
+ catch(e){info('❌ '+e.message)}}
 $('f').onchange=e=>e.target.files[0]&&load(e.target.files[0]);
 addEventListener('dragover',e=>e.preventDefault());
 addEventListener('drop',e=>{e.preventDefault();const f=e.dataTransfer.files[0];f&&load(f)});
 const KEYS={KeyX:1,KeyZ:2,ShiftLeft:4,ShiftRight:4,Enter:8,ArrowUp:16,ArrowDown:32,ArrowLeft:64,ArrowRight:128};
-addEventListener('keydown',e=>{if(KEYS[e.code]){pad|=KEYS[e.code];e.preventDefault()}});
-addEventListener('keyup',e=>{if(KEYS[e.code]){pad&=~KEYS[e.code];e.preventDefault()}});
+const typing=e=>/INPUT|SELECT|TEXTAREA/.test((e.target.tagName||''));
+addEventListener('keydown',e=>{
+ if(KEYS[e.code]){pad|=KEYS[e.code];e.preventDefault();return}
+ if(typing(e)||!nes)return;
+ if(e.code==='KeyP'){setPause(!T.paused);e.preventDefault()}
+ else if(e.code==='Period'){if(!T.paused)setPause(true);T.step++;rollC=T.frame+1;e.preventDefault()}
+ else if(e.code==='Backspace'){if(!T.rew&&T.mode==='rec')T.rerec++;T.rew=true;e.preventDefault()}
+ else if(e.code==='F5'){saveSlot(T.slot);e.preventDefault()}
+ else if(e.code==='F7'){loadSlot(T.slot);e.preventDefault()}
+ else if(/^Digit\d$/.test(e.code)){T.slot=+e.code[5];$('sSlot').value=T.slot}});
+addEventListener('keyup',e=>{if(KEYS[e.code]){pad&=~KEYS[e.code];e.preventDefault()}else if(e.code==='Backspace')T.rew=false});
 function loop(ts){
  requestAnimationFrame(loop);
- acc=Math.min(acc+ts-last,100);last=ts;
+ const dt=Math.min(ts-last,100);last=ts;
  if(!nes)return;
- let d=0;
- try{while(acc>=16.64){nes.set(pad|tp);nes.frame();APU.gen();acc-=16.64;d=1}}
- catch(e){console.error(e);$('msg').textContent='❌ 執行錯誤：'+e.message+'（PC=$'+nes.dbg().toString(16).toUpperCase()+'）';nes=null;acc=0;return}
- if(d){cx.putImageData(img,0,0);if(++fc%30==0)$('msg').textContent='執行中：'+fname+'　PC=$'+nes.dbg().toString(16).toUpperCase().padStart(4,'0')}
-}
-requestAnimationFrame(loop);
+ let ran=0;
+ try{
+  if(T.rew){if(rewTick())ran=1}
+  else if(T.paused){while(T.step>0){T.step--;if(runFrame(true,false))ran=1}}
+  else if(T.speed===0){const t0=performance.now();do{if(!runFrame(false,false))break;ran=1}while(performance.now()-t0<12&&!T.paused)}
+  else{acc=Math.min(acc+dt*T.speed,200);while(acc>=16.64&&!T.paused){if(!runFrame(true,T.speed===1))break;acc-=16.64;ran=1}}
+ }catch(e){console.error(e);info('❌ 執行錯誤：'+e.message);setPause(true)}
+ if(ran){cx.putImageData(img,0,0);if(T.paused||T.rew)rollC=T.frame}
+ if(++fc%6==0||ran&&T.paused){hud();if(rollOpen)drawRoll()}}
+rollOpen=$('tasBox').open;ui();requestAnimationFrame(loop);
 </script></body></html>
