@@ -5,7 +5,7 @@ A cycle-oriented NES emulator written in JavaScript. It runs as a single HTML pa
 ## Features
 - Cycle-stepped 6502 + per-dot PPU + APU (pulse x2, triangle, noise, DMC)
 - Mappers: 0, 1, 2, 3, 4, 7, 66
-- Accuracy: 135 / 147 tests of the [AccuracyCoin](https://github.com/100thCoin/AccuracyCoin) test ROM pass (latest ROM at the time of writing)
+- Accuracy: 138 / 147 tests of the [AccuracyCoin](https://github.com/100thCoin/AccuracyCoin) test ROM pass (latest ROM at the time of writing)
 - Built-in TAS tools: record / play movies, frame advance, rewind, 10 save-state slots, piano-roll input editor, speed control
   - Movie formats: `.fm2` (FCEUX-compatible) and `.nestas` (for movies that start from a save state)
 

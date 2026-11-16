@@ -100,15 +100,20 @@ function NES(rom){
   if(dot==65){s0a=0;inR=0;sa=0;ovb=0;cdn=0;aH=oa>>2&63;aH0=aH;aL=oa&3}
   if(dot&1){cp=oam[oa]}
   else{
-   if(cdn){aH=aH+1&63;if(sa>=32)cp=soam[sa&31]}
+   if(cdn){aH=aH+1&63;cp=soam[sa&31]}
    else{
-    const h=ctrl&32?16:8;
+    const h=ctrl&32?16:8,yb=!inR;
     if(!inR&&sl>=cp&&sl<cp+h)inR=1;
     if(sa<32){
      soam[sa]=cp;
-     if(inR){aL++;sa++;if(sa==32)o2f=1;if(aH==aH0)s0a=1;
-      if((sa&3)==0){inR=0;aL=0;aH=aH+1&63;if(aH==0)cdn=1}}
-     else{aH=aH+1&63;if(aH==0)cdn=1}
+     let t,m=0;
+     if(inR){
+      if(yb&&(oa>>2)==aH0)s0a=1;
+      sa++;if(sa==32)o2f=1;t=oa+1;
+      if((sa&3)==0){inR=0;if(!(sl>=cp&&sl<cp+h))m=1}
+     }else{t=oa+4;m=1}
+     if(t>255)cdn=1;
+     oa=(m?t&0xfc:t)&255;aH=oa>>2;aL=oa&3;
     }else{
      cp=soam[sa&31];
      if(inR){st|=0x20;aL++;if(aL==4){aH=aH+1&63;aL=0}
@@ -183,13 +188,13 @@ function NES(rom){
   case 0:ctrl=q;t=t&0xf3ff|(q&3)<<10;updNmi();break;
   case 1:mask=q;break;
   case 3:oa=q;break;
-  case 4:if(sl>=240&&sl<261||!(mask&24)){if((oa&3)==2)q&=0xe3;oam[oa]=q;oa=oa+1&255}else oa=oa+4&255;break;
+  case 4:if(sl>=240&&sl<261||!(mask&24)){if((oa&3)==2)q&=0xe3;oam[oa]=q;oa=oa+1&255}else oa=oa+4&0xfc;break;
   case 5:if(!w){t=t&0xffe0|q>>3;fx=q&7}else{t=t&0x8fff|(q&7)<<12;t=t&0xfc1f|(q&0xf8)<<2}w^=1;break;
   case 6:if(!w){t=t&0xff|(q&0x3f)<<8}else{t=t&0xff00|q;v=t}w^=1;break;
   case 7:pwr(v,q);incV()}};
  const preg=r=>{let q=obv();switch(r){
   case 2:r2++;q=st&0xe0|obv()&0x1f;if(sl==241&&dot==1)noV=1;st&=0x7f;w=0;updNmi();break;
-  case 4:if(mask&24&&(sl<240||sl==261)){if(dot>256&&dot<321){sa=(dot-257>>3)*4+Math.min(dot-257&7,3);cp=soam[sa]}else if(dot>320&&fa>0)cp=soam[((fa-1>>3)*4+Math.min(fa-1&7,3)+1)&31];q=cp}else q=oam[oa];break;
+  case 4:if(mask&24&&(sl<240||sl==261)){if(dot>256&&dot<321){sa=(dot-257>>3)*4+Math.min(dot-257&7,3);cp=soam[sa]}else if((dot>320||dot==0)&&fa>0)cp=soam[((fa-1>>3)*4+Math.min(fa-1&7,3)+1)&31];q=cp;if(dot>=65&&dot<=256&&sl<240){if(dot&1)q=oam[oa];else if(cdn||sa>=32)q=soam[sa&31]}}else q=oam[oa];break;
   case 7:{const ad=v&0x3fff;if(ad<0x3f00){q=buf;buf=prd(ad)}else{q=(prd(ad)&63&(mask&1?0x30:63))|ob&0xc0;buf=prd(ad-0x1000)}incV()}}
   if(r==2){for(let i=5;i<8;i++)obT[i]=cyc;ob=ob&0x1f|q&0xe0}else if(r==4||r==7){obT.fill(cyc);ob=q}return q};
 
@@ -216,7 +221,7 @@ function NES(rom){
  // CPU（每個週期 = 一次匯流排存取，PPU 同步前進 3 點）
  let lastRdDma=0,dumDma=0,pc=0,A=0,X=0,Y=0,S=0xfd,fN=0,fV=0,fZ=0,fC=0,fI=1,fD=0,cyc=0,pol=0,pol0=0,bh=0,cr=0;
  const end=(k=2)=>{ppu(k);if(stbD&&(cyc&1))sh=pad;cyc++;stbD=stb;APU.cyc();if(nmiO&&!nmiP)nmiE=1;nmiP=nmiO;pol0=pol;pol=nmiE||((irq||APU.il)&&!fI)?1:0};
- const rd=a=>{a&=0xffff;lastRdDma=0;if(!inDma&&(oamReq||APU.dm.req)){dmaRun(a);lastRdDma=1}ppu(2);const q=bus(a);if(a!=0x4015)db=q;if(!inDma)ib=q;end(1);return q};
+ const rd=a=>{a&=0xffff;lastRdDma=0;if(!inDma&&(oamReq||APU.dm.req)){dmaRun(a);lastRdDma=1}const e4=a>=0x2000&&a<0x4000&&(a&7)==4;ppu(e4?1:2);const q=bus(a);if(a!=0x4015)db=q;if(!inDma)ib=q;end(e4?2:1);return q};
  const oamRdS=(s,a)=>{
   if(a>=0x4000&&a<0x4020){
    if(s>=0x4000&&s<0x6000)return rd(0x4000|s&31);
