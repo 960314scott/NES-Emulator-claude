@@ -1,6 +1,6 @@
 {
   "name": "nes-emulator",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Cycle-accurate-oriented NES emulator (runs AccuracyCoin)",
   "main": "main.js",
   "author": "960314scott",

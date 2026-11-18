@@ -37,7 +37,7 @@ p{margin:0;font-size:14px;opacity:.8;text-align:center;max-width:640px}
 <div class="r"><button id="bPause">⏸ 暫停 (P)</button><button id="bStep">⏭ 單幀 (.)</button><button id="bRew">⏪ 倒帶（按住／Backspace）</button><label>速度 <select id="sSpeed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option><option value="0">最快</option></select></label></div>
 <div class="r"><button id="bRecP">⏺ 從開機錄製</button><button id="bRecH">⏺ 從目前位置錄製</button><button id="bEdit">✎ 新建電影（逐幀編輯）</button><button id="bPlay">▶ 播放電影</button><button id="bStop">⏹ 停止</button></div>
 <div class="r"><label>存檔位 <select id="sSlot"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option></select></label><button id="bSave">💾 存檔 (F5)</button><button id="bLoad">📂 讀檔 (F7)</button><button id="bSaveF">匯出存檔</button><label class="btn">匯入存檔<input type="file" id="fState" hidden></label></div>
-<div class="r"><button id="bExp">匯出 .fm2</button><button id="bExpJ">匯出 .nestas</button><label class="btn">匯入電影<input type="file" id="fMov" accept=".fm2,.nestas,.json" hidden></label></div>
+<div class="r"><button id="bExp">匯出 .fm2</button><button id="bExpJ">匯出 .nestas</button><label class="btn">匯入電影（.fm2 / .bk2 / .nestas）<input type="file" id="fMov" accept=".fm2,.bk2,.nestas,.json" hidden></label></div>
 <div id="hud">尚未載入 ROM</div><div id="inp"></div>
 <div id="roll"></div>
 <p style="text-align:left;max-width:none;font-size:12px">快速鍵：P 暫停、. 單幀、Backspace 倒帶、F5／F7 存讀檔、數字鍵 0–9 選存檔位。輸入表可直接點格子切換按鍵（暫停時可用滑鼠滾輪捲動），修改過去的幀會自動從最近的檢查點重新模擬。錄製時倒帶或讀檔會截斷電影並增加重錄次數。</p></details>
@@ -116,7 +116,7 @@ function NES(rom){
      oa=(m?t&0xfc:t)&255;aH=oa>>2;aL=oa&3;
     }else{
      cp=soam[sa&31];
-     if(inR){st|=0x20;aL++;if(aL==4){aH=aH+1&63;aL=0}
+     if(inR){sq0|=0x20;aL++;if(aL==4){aH=aH+1&63;aL=0}
       if(ovb==0)ovb=3;else{ovb--;if(ovb==0){cdn=1;aL=0}}}
      else{aH=aH+1&63;aL=aL+1&3;if(aH==0)cdn=1}
     }
@@ -145,14 +145,17 @@ function NES(rom){
    if(sAct[k]){
     if(!sp&&mask&16&&(x>7||mask&4)){const c=tLo[k]>>7&1|(tHi[k]>>7&1)<<1;if(c){sp=c;spal=4|tAt[k]&3;pri=tAt[k]&32;s0=k==0&&s0v}}
     if(mask&24){tLo[k]=tLo[k]<<1&255;tHi[k]=tHi[k]<<1&255}}}
-  if(s0&&bp&&x<255)st|=0x40;
+  if(s0&&bp&&x<255)sq0|=0x40;
   let ci=bp?bpal<<2|bp:0;
   if(sp&&(!bp||!pri))ci=spal<<2|sp;
   let c=pal[ci];if(mask&1)c&=0x30;
   fb[sl*256+x]=PAL[c&63];
  };
  const ppuDot=()=>{
-  mh.pop();mh.unshift(mask);const rn=mh[4]&24,rnS=mask&24,vis=sl<240,pre=sl==261;
+  st|=sq0;sq0=sq1;sq1=0;mh.pop();mh.unshift(mask);const rn=mh[4]&24,rnS=mask&24,vis=sl<240,pre=sl==261;
+  if(rnP&&!rn&&(vis||pre))cor=dot<65?Math.min(dot>>1,31):dot<257?(sa>=32?0:(sa+3&~3)&31):dot<321?(fa>0?((fa-1>>3)*4+Math.min(fa-1&7,3)+1)&31:0):0;
+  if(rn&&dot==0&&(vis||pre)&&cor>=0){for(let k=0;k<8;k++)oam[cor*8+k]=oam[k];cor=-1}
+  rnP=rn?1:0;
   if(vis||pre){
    if(rnS&&(dot>1&&dot<258||dot>320&&dot<338)){bgL=bgL<<1&65535;bgH=bgH<<1&65535|1;atL=atL<<1&65535;atH=atH<<1&65535}
    if(rn){
@@ -199,7 +202,7 @@ function NES(rom){
   if(r==2){for(let i=5;i<8;i++)obT[i]=cyc;ob=ob&0x1f|q&0xe0}else if(r==4||r==7){obT.fill(cyc);ob=q}return q};
 
  // 匯流排
- let pad=0,sh=0,stb=0,stbD=0,ib=0,o2f=0,fa=0,db=0,dmaP=-1,inDma=0,oamReq=0,oamSrc=0;
+ let pad=0,sh=0,stb=0,stbD=0,ib=0,o2f=0,fa=0,cor=-1,rnP=0,sq0=0,sq1=0,db=0,dmaP=-1,inDma=0,oamReq=0,oamSrc=0;
  const bus=a=>{
   if(a<0x2000)return ram[a&2047];
   if(a<0x4000)return preg(a&7);
@@ -221,7 +224,7 @@ function NES(rom){
  // CPU（每個週期 = 一次匯流排存取，PPU 同步前進 3 點）
  let lastRdDma=0,dumDma=0,pc=0,A=0,X=0,Y=0,S=0xfd,fN=0,fV=0,fZ=0,fC=0,fI=1,fD=0,cyc=0,pol=0,pol0=0,bh=0,cr=0;
  const end=(k=2)=>{ppu(k);if(stbD&&(cyc&1))sh=pad;cyc++;stbD=stb;APU.cyc();if(nmiO&&!nmiP)nmiE=1;nmiP=nmiO;pol0=pol;pol=nmiE||((irq||APU.il)&&!fI)?1:0};
- const rd=a=>{a&=0xffff;lastRdDma=0;if(!inDma&&(oamReq||APU.dm.req)){dmaRun(a);lastRdDma=1}const e4=a>=0x2000&&a<0x4000&&(a&7)==4;ppu(e4?1:2);const q=bus(a);if(a!=0x4015)db=q;if(!inDma)ib=q;end(e4?2:1);return q};
+ const rd=a=>{a&=0xffff;lastRdDma=0;if(!inDma&&(oamReq||APU.dm.req)){dmaRun(a);lastRdDma=1}const e4=a>=0x2000&&a<0x4000&&(a&7)==4;ppu(e4?1:2);let q=bus(a);const e2=a>=0x2000&&a<0x4000&&(a&7)==2;if(e2){ppu(1);q=q&0x9f|st&0x60}if(a!=0x4015)db=q;if(!inDma)ib=q;end(e2?0:e4?2:1);return q};
  const oamRdS=(s,a)=>{
   if(a>=0x4000&&a<0x4020){
    if(s>=0x4000&&s<0x6000)return rd(0x4000|s&31);
@@ -289,8 +292,8 @@ function NES(rom){
    if(a==5){X=nz(rd(ad));return}
    const x=rd(ad);wr(ad,x);wr(ad,a==6?nz(x-1&255):a==7?nz(x+1&255):nz(shf(a,x)));return}
   if(c==0){
-   if(b==4){const fl=[fN,fV,fC,fZ][a>>1],o=f();
-    if(fl==(a&1)){rd(pc);const t2=pc+(o<<24>>24)&0xffff;if((t2^pc)&0xff00)rd(pc&0xff00|t2&255);pc=t2}
+   if(b==4){const fl=[fN,fV,fC,fZ][a>>1],o=f(),p2=pol;
+    if(fl==(a&1)){rd(pc);const t2=pc+(o<<24>>24)&0xffff;if((t2^pc)&0xff00){rd(pc&0xff00|t2&255);pol0=pol0|p2}pc=t2}
     return}
    if(b==6){rd(pc);switch(a){case 0:fC=0;break;case 1:fC=1;break;case 2:fI=0;break;case 3:fI=1;break;case 4:A=nz(Y);break;case 5:fV=0;break;case 6:fD=0;break;case 7:fD=1}return}
    if(b==2){rd(pc);switch(a){case 0:push(gP()|48);break;case 1:rd(256|S);sP(pop());break;case 2:push(A);break;case 3:rd(256|S);A=nz(pop());break;
@@ -318,8 +321,8 @@ function NES(rom){
 
  fI=1;pc=bus(0xfffc)|bus(0xfffd)<<8;
  for(let i=0;i<7;i++){ppu(3);cyc++;APU.cyc()}
- const snap=()=>({sr,mc,c0,c1,pb,bs,il,ic,ie,irq,ctrl,mask,st,oa,v,t,fx,w,buf,ob,sl,dot,odd,fd,nmiO,nmiE,nmiP,noV,bgL,bgH,atL,atH,nId,nAt,nLo,nHi,sn,s0c,r2,stk,n0,sa,aH0,cp,inR,aH,aL,cdn,ovb,s0a,s0v,scnt,si,pad,sh,stb,stbD,ib,o2f,fa,db,dmaP,inDma,oamReq,oamSrc,lastRdDma,dumDma,pc,A,X,Y,S,fN,fV,fZ,fC,fI,fD,cyc,pol,pol0,bh,cr,ram:ram.slice(),prgRam:prgRam.slice(),vram:vram.slice(),oam:oam.slice(),pal:pal.slice(),soam:soam.slice(),chrR:chrRam?chr.slice():null,P:P.slice(),C:C.slice(),tLo:tLo.slice(),tHi:tHi.slice(),tAt:tAt.slice(),tX:tX.slice(),sAct:sAct.slice(),mh:mh.slice(),obT:obT.slice(),rg:rg.slice(),nta:nta.slice()});
- const load=o=>{({sr,mc,c0,c1,pb,bs,il,ic,ie,irq,ctrl,mask,st,oa,v,t,fx,w,buf,ob,sl,dot,odd,fd,nmiO,nmiE,nmiP,noV,bgL,bgH,atL,atH,nId,nAt,nLo,nHi,sn,s0c,r2,stk,n0,sa,aH0,cp,inR,aH,aL,cdn,ovb,s0a,s0v,scnt,si,pad,sh,stb,stbD,ib,o2f,fa,db,dmaP,inDma,oamReq,oamSrc,lastRdDma,dumDma,pc,A,X,Y,S,fN,fV,fZ,fC,fI,fD,cyc,pol,pol0,bh,cr}=o);ram.set(o.ram);prgRam.set(o.prgRam);vram.set(o.vram);oam.set(o.oam);pal.set(o.pal);soam.set(o.soam);if(o.chrR)chr.set(o.chrR);for(let i=0;i<P.length;i++)P[i]=o.P[i];for(let i=0;i<C.length;i++)C[i]=o.C[i];for(let i=0;i<tLo.length;i++)tLo[i]=o.tLo[i];for(let i=0;i<tHi.length;i++)tHi[i]=o.tHi[i];for(let i=0;i<tAt.length;i++)tAt[i]=o.tAt[i];for(let i=0;i<tX.length;i++)tX[i]=o.tX[i];for(let i=0;i<sAct.length;i++)sAct[i]=o.sAct[i];for(let i=0;i<mh.length;i++)mh[i]=o.mh[i];for(let i=0;i<obT.length;i++)obT[i]=o.obT[i];rg=o.rg.slice();nta=o.nta.slice()};
+ const snap=()=>({sr,mc,c0,c1,pb,bs,il,ic,ie,irq,ctrl,mask,st,oa,v,t,fx,w,buf,ob,sl,dot,odd,fd,nmiO,nmiE,nmiP,noV,bgL,bgH,atL,atH,nId,nAt,nLo,nHi,sn,s0c,r2,stk,n0,sa,aH0,cp,inR,aH,aL,cdn,ovb,s0a,s0v,scnt,si,pad,sh,stb,stbD,ib,o2f,fa,cor,rnP,sq0,sq1,db,dmaP,inDma,oamReq,oamSrc,lastRdDma,dumDma,pc,A,X,Y,S,fN,fV,fZ,fC,fI,fD,cyc,pol,pol0,bh,cr,ram:ram.slice(),prgRam:prgRam.slice(),vram:vram.slice(),oam:oam.slice(),pal:pal.slice(),soam:soam.slice(),chrR:chrRam?chr.slice():null,P:P.slice(),C:C.slice(),tLo:tLo.slice(),tHi:tHi.slice(),tAt:tAt.slice(),tX:tX.slice(),sAct:sAct.slice(),mh:mh.slice(),obT:obT.slice(),rg:rg.slice(),nta:nta.slice()});
+ const load=o=>{({sr,mc,c0,c1,pb,bs,il,ic,ie,irq,ctrl,mask,st,oa,v,t,fx,w,buf,ob,sl,dot,odd,fd,nmiO,nmiE,nmiP,noV,bgL,bgH,atL,atH,nId,nAt,nLo,nHi,sn,s0c,r2,stk,n0,sa,aH0,cp,inR,aH,aL,cdn,ovb,s0a,s0v,scnt,si,pad,sh,stb,stbD,ib,o2f,fa,cor,rnP,sq0,sq1,db,dmaP,inDma,oamReq,oamSrc,lastRdDma,dumDma,pc,A,X,Y,S,fN,fV,fZ,fC,fI,fD,cyc,pol,pol0,bh,cr}=o);ram.set(o.ram);prgRam.set(o.prgRam);vram.set(o.vram);oam.set(o.oam);pal.set(o.pal);soam.set(o.soam);if(o.chrR)chr.set(o.chrR);for(let i=0;i<P.length;i++)P[i]=o.P[i];for(let i=0;i<C.length;i++)C[i]=o.C[i];for(let i=0;i<tLo.length;i++)tLo[i]=o.tLo[i];for(let i=0;i<tHi.length;i++)tHi[i]=o.tHi[i];for(let i=0;i<tAt.length;i++)tAt[i]=o.tAt[i];for(let i=0;i<tX.length;i++)tX[i]=o.tX[i];for(let i=0;i<sAct.length;i++)sAct[i]=o.sAct[i];for(let i=0;i<mh.length;i++)mh[i]=o.mh[i];for(let i=0;i<obT.length;i++)obT[i]=o.obT[i];rg=o.rg.slice();nta=o.nta.slice()};
  return{snap,load,set:p=>pad=p,dbg:()=>pc,frame(){
   fd=0;while(!fd)step();
   // 防卡死：連續約 2 秒瘋狂輪詢 $2002 卻等不到旗標，就強制給出旗標讓測試繼續（該測試會顯示 FAIL）
@@ -333,7 +336,7 @@ NP=[4,8,16,32,64,96,128,160,202,254,380,508,762,1016,2034,4068],
 DR=[428,380,340,320,286,254,226,214,190,160,142,128,106,84,72,54];
 const APU=(()=>{
  let ac=null,sr=44100,ring=new Float32Array(32768),rp=0,wp=0,fr=0,ch=[],cc=0,sc=0,dl=[];
- let fcc=0,fm=0,inh=0,fIrq=0,fclr=0,fwd=0,fnv=0,dm={};
+ let fcc=0,fm=0,inh=0,fIrq=0,fclr=0,fil=0,fwd=0,fnv=0,dm={};
  const A={il:0,dm:null};
  const mk=()=>({en:0,len:0,duty:0,halt:0,nh:0,lr:0,lp:0,cv:0,vol:0,ev:0,ec:0,es:0,tm:0,ph:0,swE:0,swP:0,swS:0,swN:0,swR:0,swC:0,lin:0,linR:0,rl:0,mode:0,per:4,lf:1,lv:0});
  const env=c=>{if(c.es){c.es=0;c.ev=15;c.ec=c.vol}else if(c.ec>0)c.ec--;else{c.ec=c.vol;if(c.ev>0)c.ev--;else if(c.halt)c.ev=15}};
@@ -347,9 +350,9 @@ const APU=(()=>{
  const noi=c=>{c.ph+=1789773/c.per/sr;while(c.ph>=1){c.ph--;const b=(c.lf^c.lf>>(c.mode?6:1))&1;c.lf=c.lf>>1|b<<14}return c.len&&!(c.lf&1)?(c.cv?c.vol:c.ev):0};
  const smp=d=>{const a=pul(ch[0])+pul(ch[1]),t=tri(ch[2]),n=noi(ch[3]);return((a?95.88/(8128/a+100):0)+(t+n+d?159.79/(1/(t/8227+n/12241+d/22638)+100):0))*0.8};
  return Object.assign(A,{
-  asnap(){return{ch:JSON.parse(JSON.stringify(ch)),dm:Object.assign({},dm),cc,fcc,fm,inh,fIrq,fclr,fwd,fnv,il:A.il}},
-  aload(o){ch=JSON.parse(JSON.stringify(o.ch));dm=Object.assign({},o.dm);A.dm=dm;cc=o.cc;fcc=o.fcc;fm=o.fm;inh=o.inh;fIrq=o.fIrq;fclr=o.fclr;fwd=o.fwd;fnv=o.fnv;A.il=o.il},
-  init(){ch=[mk(),mk(),mk(),mk()];cc=0;fcc=0;fm=0;inh=0;fIrq=0;fclr=0;fwd=0;dl=[];A.il=0;
+  asnap(){return{ch:JSON.parse(JSON.stringify(ch)),dm:Object.assign({},dm),cc,fcc,fm,inh,fIrq,fclr,fil,fwd,fnv,il:A.il}},
+  aload(o){ch=JSON.parse(JSON.stringify(o.ch));dm=Object.assign({},o.dm);A.dm=dm;cc=o.cc;fcc=o.fcc;fm=o.fm;inh=o.inh;fIrq=o.fIrq;fclr=o.fclr;fil=o.fil;fwd=o.fwd;fnv=o.fnv;A.il=o.il},
+  init(){ch=[mk(),mk(),mk(),mk()];cc=0;fcc=0;fm=0;inh=0;fIrq=0;fclr=0;fil=0;fwd=0;dl=[];A.il=0;
    dm={lvl:0,per:DR[0]-1,tm:0,loop:0,irqE:0,irq:0,addr:0xc000,len:1,cur:0xc000,rem:0,buf:0,hb:0,sh:0,bits:8,sil:1,dly:0,req:0};A.dm=dm},
   start(){if(ac)return ac.resume();ac=new AudioContext();sr=ac.sampleRate;const sp=ac.createScriptProcessor(2048,0,1);
    sp.onaudioprocess=e=>{const o=e.outputBuffer.getChannelData(0);for(let i=0;i<o.length;i++){if(rp!=wp){o[i]=ring[rp];rp=rp+1&32767}else o[i]=0}};sp.connect(ac.destination)},
@@ -357,6 +360,7 @@ const APU=(()=>{
   cyc(){
    if(!ch.length)return;
    cc++;
+   if(fclr&&!(cc&1)){fIrq=0;fclr=0}
    if(fwd&&--fwd==0){fm=fnv;fcc=0;if(fm){qf();hf()}}
    else{
     fcc++;
@@ -364,12 +368,11 @@ const APU=(()=>{
     else if(fcc==14913){qf();hf()}
     else if(fcc==22371)qf();
     else if(fm==0){
-     if(fcc==29828){if(!inh)fIrq=1}
-     else if(fcc==29829){qf();hf();if(!inh)fIrq=1}
-     else if(fcc==29830){if(!inh)fIrq=1;fcc=0}
+     if(fcc==29828){fIrq=1}
+     else if(fcc==29829){qf();hf();fIrq=1;if(!inh)fil=1}
+     else if(fcc==29830){fIrq=inh?0:1;if(!inh)fil=1;fcc=0}
     }else if(fcc==37281){qf();hf()}
     else if(fcc==37282)fcc=0}
-   if(fclr&&!(cc&1)){fIrq=0;fclr=0}
    for(let i=0;i<4;i++){const c=ch[i];c.halt=c.nh;if(c.lr){if(c.len==c.lp)c.len=c.lr;c.lr=0}}
    if(dm.dly&&--dm.dly==0)need();
    if(dm.tm==0){dm.tm=dm.per;
@@ -377,20 +380,20 @@ const APU=(()=>{
     if(--dm.bits==0){dm.bits=8;if(dm.hb){dm.sil=0;dm.sh=dm.buf;dm.hb=0;need()}else dm.sil=1}
    }else dm.tm--;
    if(dm.pd){dm.pd=0;if(dm.rem>0&&--dm.rem==0){if(dm.loop){dm.cur=dm.addr;dm.rem=dm.len}else{dm.ex=1;if(dm.irqE)dm.irq=1}}}
-   A.il=fIrq|dm.irq;
+   if(!fIrq)fil=0;A.il=(fIrq&&fil)|dm.irq;
    if(ac){sc+=sr;if(sc>=1789773){sc-=1789773;dl.push(dm.lvl)}}
   },
   // DMC DMA 取得的一個位元組
   load(b){dm.buf=b;dm.hb=1;dm.req=0;dm.cur=dm.cur==0xffff?0x8000:dm.cur+1;
    dm.pd=1;
-   A.il=fIrq|dm.irq},
+   if(!fIrq)fil=0;A.il=(fIrq&&fil)|dm.irq},
   w(a,v){
    if(!ch.length)return;
    if(a==0x4015){ch.forEach((c,k)=>{c.en=v>>k&1;if(!c.en)c.len=0});dm.irq=0;
     if(v&16){if(dm.rem==0){dm.cur=dm.addr;dm.rem=dm.len;dm.ex=0;dm.dly=cc&1?3:4}}else{if(dm.bits==1&&dm.hb&&dm.rem>0){if(dm.tm==0)dm.keep=1;else if(dm.tm<=2)dm.pre=1}dm.rem=0;dm.ex=0}
-    A.il=fIrq;return}
-   if(a==0x4017){inh=v>>6&1;if(inh)fIrq=0;fnv=v>>7&1;fwd=cc&1?3:4;A.il=fIrq|dm.irq;return}
-   if(a==0x4010){dm.irqE=v>>7;dm.loop=v>>6&1;dm.per=DR[v&15]-1;if(!dm.irqE)dm.irq=0;A.il=fIrq|dm.irq;return}
+    if(!fIrq)fil=0;A.il=(fIrq&&fil)|dm.irq;return}
+   if(a==0x4017){inh=v>>6&1;if(inh)fIrq=0;fnv=v>>7&1;fwd=cc&1?3:4;if(!fIrq)fil=0;A.il=(fIrq&&fil)|dm.irq;return}
+   if(a==0x4010){dm.irqE=v>>7;dm.loop=v>>6&1;dm.per=DR[v&15]-1;if(!dm.irqE)dm.irq=0;if(!fIrq)fil=0;A.il=(fIrq&&fil)|dm.irq;return}
    if(a==0x4011){dm.lvl=v&127;return}
    if(a==0x4012){dm.addr=0xc000|v<<6;return}
    if(a==0x4013){dm.len=v<<4|1;return}
@@ -479,9 +482,61 @@ function fromFM2(txt){
  return{mov,rr}}
 function dl(name,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000)}
 function importMovie(txt){
- if(txt.trim()[0]==='{'){const o=de(txt);T.mov=Array.from(unb64(o.mov));T.anchor=o.anchor||null;T.rerec=o.rerec||0}
- else{const r=fromFM2(txt);T.mov=r.mov;T.rerec=r.rr;T.anchor=null}
+ let mov,anchor=null,rr=0;
+ if(txt.trim()[0]==='{'){const o=de(txt);mov=Array.from(unb64(o.mov));anchor=o.anchor||null;rr=o.rerec||0}
+ else{const r=fromFM2(txt);mov=r.mov;rr=r.rr}
+ if(!mov.length)throw new Error('電影檔裡沒有任何輸入幀，格式可能不正確');
+ T.mov=mov;T.anchor=anchor;T.rerec=rr;
  Object.assign(T,{mode:'free',tl:false});info('已匯入電影：'+T.mov.length+' 幀（按「播放電影」從頭播放）')}
+// ---- BK2（BizHawk）匯入：BK2 其實是 ZIP，內含 Header.txt 與 Input Log.txt ----
+const td=new TextDecoder();
+async function inflateRaw(d){return new Uint8Array(await new Response(new Blob([d]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer())}
+async function unzip(buf,want){
+ const u=new Uint8Array(buf),dv=new DataView(buf);let e=-1;
+ for(let i=u.length-22;i>=Math.max(0,u.length-65557);i--)if(dv.getUint32(i,true)===0x06054b50){e=i;break}
+ if(e<0)throw new Error('不是有效的 BK2（ZIP）檔');
+ const cnt=dv.getUint16(e+10,true);let p=dv.getUint32(e+16,true);const files={},names=[];
+ for(let k=0;k<cnt&&dv.getUint32(p,true)===0x02014b50;k++){
+  const m=dv.getUint16(p+10,true),cs=dv.getUint32(p+20,true),nl=dv.getUint16(p+28,true),xl=dv.getUint16(p+30,true),cl=dv.getUint16(p+32,true),lh=dv.getUint32(p+42,true);
+  const name=td.decode(u.subarray(p+46,p+46+nl)).split('/').pop();p+=46+nl+xl+cl;names.push(name);
+  if(!want(name))continue;
+  if(cs===0xffffffff||lh===0xffffffff)throw new Error('不支援 ZIP64 格式');
+  if(m!==0&&m!==8)throw new Error('不支援的壓縮方式（'+m+'）');
+  const ds=lh+30+dv.getUint16(lh+26,true)+dv.getUint16(lh+28,true),d=u.subarray(ds,ds+cs);
+  files[name]=m===0?d:await inflateRaw(d)}
+ return{files,names}}
+async function parseBk2(buf){
+ const z=await unzip(buf,n=>/^(Header|Input Log)\.txt$/i.test(n));
+ const get=n=>{const k=Object.keys(z.files).find(x=>x.toLowerCase()===n);return k?td.decode(z.files[k]):''};
+ const hd=get('header.txt'),lg=get('input log.txt');
+ if(!lg)throw new Error('BK2 內找不到 Input Log.txt');
+ const H={};for(const l of hd.split(/\r?\n/)){const m=l.match(/^(\S+)\s+(.*)$/);if(m)H[m[1]]=m[2].trim()}
+ if(H.Platform&&!/^nes$/i.test(H.Platform))throw new Error('此 BK2 的平台是 '+H.Platform+'，只支援 NES');
+ if(/^true$/i.test(H.StartsFromSavestate||'')||z.names.some(n=>/^savestate/i.test(n)))throw new Error('此 BK2 是從存檔狀態開始的，無法匯入（需要 BizHawk 的存檔）');
+ const bit={up:16,down:32,left:64,right:128,select:4,start:8,b:2,a:1};
+ let map=null;const mov=[],resets=[];
+ for(const ln of lg.split(/\r?\n/)){
+  if(ln.startsWith('LogKey:')){
+   const seen={};
+   map=ln.slice(7).split('|').map(s=>s.replace(/#/g,'').trim()).filter(Boolean).map(n=>{
+    const m=n.match(/^(P1\s+)?(Up|Down|Left|Right|Select|Start|B|A)$/i);
+    if(!m)return /^reset$/i.test(n)?'R':/^power$/i.test(n)?'W':0;
+    const k=m[2].toLowerCase();if(!m[1]){if(seen[k])return 0;seen[k]=1}return bit[k]})}
+  else if(map&&ln[0]==='|'){
+   const f=ln.replace(/\|/g,'');let v=0;
+   for(let i=0;i<map.length;i++){
+    const c=f[i];if(c===undefined||c==='.'||c===' ')continue;const t=map[i];
+    if(t==='R')resets.push(mov.length);else if(t==='W'){if(mov.length>0)resets.push(mov.length)}else v|=t}
+   mov.push(v)}}
+ if(!map)throw new Error('Input Log.txt 格式不認得（找不到 LogKey）');
+ if(!mov.length)throw new Error('BK2 內沒有任何輸入幀');
+ return{mov,rr:+(H.rerecordCount||0)||0,resets,name:H.GameName||''}}
+async function importFile(f){
+ const buf=await f.arrayBuffer(),u=new Uint8Array(buf);
+ if(u[0]===0x50&&u[1]===0x4b){
+  const r=await parseBk2(buf);T.mov=r.mov;T.rerec=r.rr;T.anchor=null;Object.assign(T,{mode:'free',tl:false});
+  info('已匯入 BK2 電影：'+T.mov.length+' 幀'+(r.name?'（'+r.name+'）':'')+(r.resets.length?'　⚠ 含重置動作（第 '+r.resets.slice(0,3).join('、')+(r.resets.length>3?' 等':'')+' 幀），本模擬器不支援電影中途重置，可能在該處失去同步':'')+'　（按「播放電影」從頭播放）')}
+ else importMovie(td.decode(u))}
 // 介面
 const RR=17,roll=$('roll');let rollC=0,rollOpen=false;
 function buildRoll(){roll.innerHTML='<div class="rr h"><i>幀</i>'+BN.map(n=>'<b>'+n+'</b>').join('')+'</div>'+('<div class="rr"><i></i>'+BN.map((n,b)=>'<b data-b="'+b+'"></b>').join('')+'</div>').repeat(RR)}
@@ -513,7 +568,7 @@ function ui(){
  $('fState').onchange=async e=>{const f=e.target.files[0];if(!f||!nes)return;try{T.slots[T.slot]=de(await f.text());loadSlot(T.slot)}catch(x){info('❌ 存檔格式錯誤')}};
  $('bExp').onclick=()=>T.mov.length&&!T.anchor?dl((T.romName||'movie').replace(/\.nes$/i,'')+'.fm2',toFM2()):info(T.anchor?'從中途位置開始的電影請用 .nestas 匯出':'沒有電影可匯出');
  $('bExpJ').onclick=()=>T.mov.length?dl((T.romName||'movie').replace(/\.nes$/i,'')+'.nestas',ser({nestas:1,rom:T.romName,rerec:T.rerec,mov:b64(Uint8Array.from(T.mov)),anchor:T.anchor})):info('沒有電影可匯出');
- $('fMov').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{importMovie(await f.text())}catch(x){info('❌ 電影檔格式錯誤')}};
+ $('fMov').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{await importFile(f)}catch(x){info('❌ '+(x&&x.message?x.message:'電影檔格式錯誤'))}};
  $('tasBox').ontoggle=e=>{rollOpen=e.target.open;if(rollOpen)drawRoll()};
  roll.onclick=e=>{const b=e.target.dataset.b;if(b===undefined||!nes)return;const f=+e.target.parentNode.dataset.f;if(editCell(f,+b)){drawRoll();hud();cx.putImageData(img,0,0)}};
  roll.onwheel=e=>{if(!T.paused)return;e.preventDefault();rollC=Math.max(0,rollC+(e.deltaY>0?3:-3));drawRoll()}}
